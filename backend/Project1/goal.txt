@@ -1,0 +1,6 @@
+Train a neural network to approximate trig functions (eg., sin(x))
+
+Workflow:
+- Generate dataset of (x, sin(x)) pairs.
+- Train with tensorflow.
+- Convert to tensorflow life for deployment.
