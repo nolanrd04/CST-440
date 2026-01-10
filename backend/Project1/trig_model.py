@@ -38,7 +38,7 @@ for x_val in x_base:
         y_samples.append(tan_val)
 
 names = ['sin', 'cos', 'tan']
-filename = 'trig_model_all.keras'
+filename = 'trig_model_all'
 
 # Convert to numpy arrays
 x = np.array(X_samples)
@@ -131,5 +131,5 @@ if len(names) > 1:
 print("=" * 50)
 
 # Save model
-model.save(filename)
+model.save(filename, save_format='tf')
 print(f"\nModel saved to {filename}")
