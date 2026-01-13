@@ -211,21 +211,33 @@ class TFLiteModelEvaluator:
         # Calculate absolute errors
         abs_errors = np.abs(y_test - y_pred)
 
-        # Calculate relative errors with safeguard for near-zero values
-        # Use relative error for |true| > 0.01, otherwise use absolute error
-        threshold = 0.01
-        relative_errors = np.where(
-            np.abs(y_test) > threshold,
-            abs_errors / np.abs(y_test),  # Relative error: |pred - true| / |true|
-            abs_errors                     # Absolute error for values near zero
+        # Calculate relative errors (percentage)
+        # Avoid division by zero - use absolute error for very small values
+        safe_relative_errors = np.where(
+            np.abs(y_test) > 0.01,
+            (abs_errors / np.abs(y_test)) * 100,  # Relative error as percentage
+            abs_errors * 100  # For near-zero values, treat absolute error as percentage
         )
 
+        # Two accuracy metrics:
+        # 1. Absolute accuracy: what % of predictions are within 0.05 absolute error
+        absolute_accuracy = np.mean(abs_errors < 0.05) * 100
+
+        # 2. Relative accuracy: what % of predictions are within tolerance% relative error
+        # (only for values where |true| > 0.01)
+        mask_non_zero = np.abs(y_test) > 0.01
+        if np.sum(mask_non_zero) > 0:
+            rel_errors_non_zero = (abs_errors[mask_non_zero] / np.abs(y_test[mask_non_zero])) * 100
+            relative_accuracy = np.mean(rel_errors_non_zero < (tolerance * 100)) * 100
+        else:
+            relative_accuracy = 100.0
+
         # Overall metrics
-        overall_accuracy = np.mean(relative_errors < tolerance) * 100
+        overall_accuracy = absolute_accuracy  # Use absolute accuracy as primary metric
         overall_mae = np.mean(abs_errors)
         overall_max_error = np.max(abs_errors)
         overall_rmse = np.sqrt(np.mean(abs_errors ** 2))
-        overall_mean_rel_error = np.mean(relative_errors) * 100  # as percentage
+        overall_mean_rel_error = np.mean(safe_relative_errors)  # as percentage
 
         results = {
             'overall': {
@@ -246,16 +258,27 @@ class TFLiteModelEvaluator:
                 func_y_test = y_test[mask]
                 func_y_pred = y_pred[mask]
                 func_abs_errors = abs_errors[mask]
-                func_rel_errors = relative_errors[mask]
 
-                func_accuracy = np.mean(func_rel_errors < tolerance) * 100
+                # Calculate absolute accuracy for this function
+                func_abs_accuracy = np.mean(func_abs_errors < 0.05) * 100
+
+                # Calculate relative accuracy (only for non-zero values)
+                func_mask_non_zero = np.abs(func_y_test) > 0.01
+                if np.sum(func_mask_non_zero) > 0:
+                    func_rel_err = (func_abs_errors[func_mask_non_zero] / np.abs(func_y_test[func_mask_non_zero])) * 100
+                    func_rel_accuracy = np.mean(func_rel_err < (tolerance * 100)) * 100
+                    func_mean_rel_error = np.mean(func_rel_err)
+                else:
+                    func_rel_accuracy = 100.0
+                    func_mean_rel_error = 0.0
+
                 func_mae = np.mean(func_abs_errors)
                 func_max_error = np.max(func_abs_errors)
                 func_rmse = np.sqrt(np.mean(func_abs_errors ** 2))
-                func_mean_rel_error = np.mean(func_rel_errors) * 100
 
                 results[func_name] = {
-                    'accuracy': func_accuracy,
+                    'accuracy': func_abs_accuracy,  # Use absolute accuracy
+                    'relative_accuracy': func_rel_accuracy,
                     'mae': func_mae,
                     'max_error': func_max_error,
                     'rmse': func_rmse,
@@ -273,7 +296,7 @@ class TFLiteModelEvaluator:
             if func_name in results:
                 r = results[func_name]
                 print(f"{func_name}(x):")
-                print(f"  Accuracy: {r['accuracy']:.2f}% (within {tolerance*100:.0f}% relative error)")
+                print(f"  Accuracy: {r['accuracy']:.2f}% (within 0.05 absolute error)")
                 print(f"  Mean Relative Error: {r['mean_rel_error']:.2f}%")
                 print(f"  MAE: {r['mae']:.6f}")
                 print(f"  RMSE: {r['rmse']:.6f}")
@@ -284,7 +307,7 @@ class TFLiteModelEvaluator:
         # Overall results
         r = results['overall']
         print(f"Overall Performance:")
-        print(f"  Accuracy: {r['accuracy']:.2f}% (within {tolerance*100:.0f}% relative error)")
+        print(f"  Accuracy: {r['accuracy']:.2f}% (within 0.05 absolute error)")
         print(f"  Mean Relative Error: {r['mean_rel_error']:.2f}%")
         print(f"  MAE: {r['mae']:.6f}")
         print(f"  RMSE: {r['rmse']:.6f}")
@@ -306,7 +329,7 @@ class TFLiteModelEvaluator:
                 true_val = y_test[i]
                 pred_val = y_pred[i]
                 abs_err = abs_errors[i]
-                rel_err = relative_errors[i] * 100
+                rel_err = safe_relative_errors[i]
 
                 print(f"{func:<6} {x_denorm:>7.3f} {true_val:>9.5f} {pred_val:>9.5f} {abs_err:>9.5f} {rel_err:>9.2f}")
 

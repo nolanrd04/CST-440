@@ -172,11 +172,11 @@ class TFLiteModelVisualizer:
         # Calculate errors
         abs_errors = np.abs(y_test - y_pred)
 
-        threshold = 0.01
+        # Calculate relative errors (as percentage, for display only)
         relative_errors = np.where(
-            np.abs(y_test) > threshold,
-            abs_errors / np.abs(y_test),
-            abs_errors
+            np.abs(y_test) > 0.01,
+            (abs_errors / np.abs(y_test)) * 100,  # Relative error as percentage
+            abs_errors * 100  # For near-zero values
         )
 
         print(f"✓ Inference complete")
@@ -258,10 +258,10 @@ class TFLiteModelVisualizer:
 
         for func_name in ['sin', 'cos', 'tan']:
             mask = np.array([label == func_name for label in func_labels])
-            func_rel_errors = relative_errors[mask]
             func_abs_errors = abs_errors[mask]
 
-            accuracy = np.mean(func_rel_errors < 0.05) * 100
+            # Use absolute error for accuracy: % within 0.05 error
+            accuracy = np.mean(func_abs_errors < 0.05) * 100
             mae = np.mean(func_abs_errors)
 
             accuracies.append(accuracy)
@@ -272,7 +272,7 @@ class TFLiteModelVisualizer:
         bars = ax.bar(x_pos, accuracies, color=[colors[f] for f in function_names], alpha=0.7, edgecolor='black')
 
         ax.set_ylabel('Accuracy (%)')
-        ax.set_title('Accuracy Comparison\n(within 5% relative error)')
+        ax.set_title('Accuracy Comparison\n(within 0.05 absolute error)')
         ax.set_xticks(x_pos)
         ax.set_xticklabels(function_names)
         ax.set_ylim([0, 105])
@@ -307,7 +307,7 @@ class TFLiteModelVisualizer:
         for func_name in ['sin', 'cos', 'tan']:
             mask = np.array([label == func_name for label in func_labels])
             func_x = x_raw[mask]
-            func_rel_errors = relative_errors[mask] * 100  # as percentage
+            func_rel_errors = relative_errors[mask]  # already as percentage
 
             ax.scatter(func_x, func_rel_errors, alpha=0.4,
                       color=colors[func_name], s=10, label=func_name)
@@ -335,15 +335,16 @@ class TFLiteModelVisualizer:
         for func_name in ['sin', 'cos', 'tan']:
             mask = np.array([label == func_name for label in func_labels])
             func_abs_errors = abs_errors[mask]
-            func_rel_errors = relative_errors[mask]
+            func_rel_errors = relative_errors[mask]  # already as percentage
 
-            accuracy = np.mean(func_rel_errors < 0.05) * 100
+            # Use absolute error for accuracy
+            accuracy = np.mean(func_abs_errors < 0.05) * 100
             mae = np.mean(func_abs_errors)
             max_error = np.max(func_abs_errors)
-            mean_rel_error = np.mean(func_rel_errors) * 100
+            mean_rel_error = np.mean(func_rel_errors)
 
             print(f"\n{func_name}(x):")
-            print(f"  Accuracy: {accuracy:.2f}% (within 5% relative error)")
+            print(f"  Accuracy: {accuracy:.2f}% (within 0.05 absolute error)")
             print(f"  Mean Relative Error: {mean_rel_error:.2f}%")
             print(f"  MAE: {mae:.6f}")
             print(f"  Max Error: {max_error:.6f}")
