@@ -9,3 +9,4 @@ ipython
 requests
 python-dotenv
 tensorflow
+tensorflow-model-optimization
