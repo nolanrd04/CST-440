@@ -36,6 +36,11 @@ class TFLiteModelVisualizer:
         """
         self.model_path = model_path
         self.interpreter = None
+        self.is_quantized = False
+        self.input_scale = None
+        self.input_zero_point = None
+        self.output_scale = None
+        self.output_zero_point = None
         self._load_model()
 
     def _load_model(self):
@@ -56,6 +61,28 @@ class TFLiteModelVisualizer:
             output_details = self.interpreter.get_output_details()
 
             print(f"✓ Model loaded: {self.model_path}")
+
+            # Check if model is quantized
+            input_dtype = input_details[0]['dtype']
+            output_dtype = output_details[0]['dtype']
+
+            if input_dtype == np.int8 or output_dtype == np.int8:
+                self.is_quantized = True
+
+                # Get quantization parameters
+                input_quant = input_details[0]['quantization_parameters']
+                output_quant = output_details[0]['quantization_parameters']
+
+                self.input_scale = input_quant['scales'][0]
+                self.input_zero_point = input_quant['zero_points'][0]
+                self.output_scale = output_quant['scales'][0]
+                self.output_zero_point = output_quant['zero_points'][0]
+
+                print(f"  ⚠️  QUANTIZED MODEL (int8)")
+                print(f"  Using automatic quantization-aware inference")
+            else:
+                print(f"  ✓ Float32 model (not quantized)")
+
             size_bytes = os.path.getsize(self.model_path)
             print(f"  Model size: {size_bytes:,} bytes ({size_bytes/1024:.2f} KB)")
 
@@ -64,17 +91,30 @@ class TFLiteModelVisualizer:
             sys.exit(1)
 
     def predict(self, x_input):
-        """Run inference on input data."""
+        """Run inference on input data with automatic quantization handling."""
         input_details = self.interpreter.get_input_details()
         output_details = self.interpreter.get_output_details()
 
         predictions = []
         for i in range(len(x_input)):
-            input_data = x_input[i:i+1].astype(input_details[0]['dtype'])
+            input_data = x_input[i:i+1]
+
+            # Quantize input if model expects int8
+            if self.is_quantized and input_details[0]['dtype'] == np.int8:
+                input_data = (input_data / self.input_scale + self.input_zero_point).astype(np.int8)
+            else:
+                input_data = input_data.astype(input_details[0]['dtype'])
+
+            # Run inference
             self.interpreter.set_tensor(input_details[0]['index'], input_data)
             self.interpreter.invoke()
-            output = self.interpreter.get_tensor(output_details[0]['index'])
-            predictions.append(output[0][0])
+            output = self.interpreter.get_tensor(output_details[0]['index'])[0][0]
+
+            # Dequantize output if model returns int8
+            if self.is_quantized and output_details[0]['dtype'] == np.int8:
+                output = (output.astype(np.float32) - self.output_zero_point) * self.output_scale
+
+            predictions.append(output)
 
         return np.array(predictions)
 
@@ -132,11 +172,11 @@ class TFLiteModelVisualizer:
         # Calculate errors
         abs_errors = np.abs(y_test - y_pred)
 
-        threshold = 0.01
+        # Calculate relative errors (as percentage, for display only)
         relative_errors = np.where(
-            np.abs(y_test) > threshold,
-            abs_errors / np.abs(y_test),
-            abs_errors
+            np.abs(y_test) > 0.01,
+            (abs_errors / np.abs(y_test)) * 100,  # Relative error as percentage
+            abs_errors * 100  # For near-zero values
         )
 
         print(f"✓ Inference complete")
@@ -218,10 +258,10 @@ class TFLiteModelVisualizer:
 
         for func_name in ['sin', 'cos', 'tan']:
             mask = np.array([label == func_name for label in func_labels])
-            func_rel_errors = relative_errors[mask]
             func_abs_errors = abs_errors[mask]
 
-            accuracy = np.mean(func_rel_errors < 0.05) * 100
+            # Use absolute error for accuracy: % within 0.05 error
+            accuracy = np.mean(func_abs_errors < 0.05) * 100
             mae = np.mean(func_abs_errors)
 
             accuracies.append(accuracy)
@@ -232,7 +272,7 @@ class TFLiteModelVisualizer:
         bars = ax.bar(x_pos, accuracies, color=[colors[f] for f in function_names], alpha=0.7, edgecolor='black')
 
         ax.set_ylabel('Accuracy (%)')
-        ax.set_title('Accuracy Comparison\n(within 5% relative error)')
+        ax.set_title('Accuracy Comparison\n(within 0.05 absolute error)')
         ax.set_xticks(x_pos)
         ax.set_xticklabels(function_names)
         ax.set_ylim([0, 105])
@@ -267,7 +307,7 @@ class TFLiteModelVisualizer:
         for func_name in ['sin', 'cos', 'tan']:
             mask = np.array([label == func_name for label in func_labels])
             func_x = x_raw[mask]
-            func_rel_errors = relative_errors[mask] * 100  # as percentage
+            func_rel_errors = relative_errors[mask]  # already as percentage
 
             ax.scatter(func_x, func_rel_errors, alpha=0.4,
                       color=colors[func_name], s=10, label=func_name)
@@ -295,15 +335,16 @@ class TFLiteModelVisualizer:
         for func_name in ['sin', 'cos', 'tan']:
             mask = np.array([label == func_name for label in func_labels])
             func_abs_errors = abs_errors[mask]
-            func_rel_errors = relative_errors[mask]
+            func_rel_errors = relative_errors[mask]  # already as percentage
 
-            accuracy = np.mean(func_rel_errors < 0.05) * 100
+            # Use absolute error for accuracy
+            accuracy = np.mean(func_abs_errors < 0.05) * 100
             mae = np.mean(func_abs_errors)
             max_error = np.max(func_abs_errors)
-            mean_rel_error = np.mean(func_rel_errors) * 100
+            mean_rel_error = np.mean(func_rel_errors)
 
             print(f"\n{func_name}(x):")
-            print(f"  Accuracy: {accuracy:.2f}% (within 5% relative error)")
+            print(f"  Accuracy: {accuracy:.2f}% (within 0.05 absolute error)")
             print(f"  Mean Relative Error: {mean_rel_error:.2f}%")
             print(f"  MAE: {mae:.6f}")
             print(f"  Max Error: {max_error:.6f}")

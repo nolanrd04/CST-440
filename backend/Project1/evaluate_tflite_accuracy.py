@@ -35,6 +35,11 @@ class TFLiteModelEvaluator:
         """
         self.model_path = model_path
         self.interpreter = None
+        self.is_quantized = False
+        self.input_scale = None
+        self.input_zero_point = None
+        self.output_scale = None
+        self.output_zero_point = None
         self._load_model()
 
     def _load_model(self):
@@ -62,6 +67,29 @@ class TFLiteModelEvaluator:
             print(f"  Output shape: {output_details[0]['shape']}")
             print(f"  Output type: {output_details[0]['dtype'].__name__}")
 
+            # Check if model is quantized
+            input_dtype = input_details[0]['dtype']
+            output_dtype = output_details[0]['dtype']
+
+            if input_dtype == np.int8 or output_dtype == np.int8:
+                self.is_quantized = True
+
+                # Get quantization parameters
+                input_quant = input_details[0]['quantization_parameters']
+                output_quant = output_details[0]['quantization_parameters']
+
+                self.input_scale = input_quant['scales'][0]
+                self.input_zero_point = input_quant['zero_points'][0]
+                self.output_scale = output_quant['scales'][0]
+                self.output_zero_point = output_quant['zero_points'][0]
+
+                print(f"\n⚠️  QUANTIZED MODEL DETECTED")
+                print(f"  Input quantization: scale={self.input_scale:.6f}, zero_point={self.input_zero_point}")
+                print(f"  Output quantization: scale={self.output_scale:.6f}, zero_point={self.output_zero_point}")
+                print(f"  Using automatic quantization-aware inference")
+            else:
+                print(f"\n✓ Float32 model (not quantized)")
+
             # Get model size
             size_bytes = os.path.getsize(self.model_path)
             print(f"  Model size: {size_bytes:,} bytes ({size_bytes/1024:.2f} KB)")
@@ -72,13 +100,13 @@ class TFLiteModelEvaluator:
 
     def predict(self, x_input):
         """
-        Run inference on input data.
+        Run inference on input data with automatic quantization handling.
 
         Args:
             x_input: NumPy array of shape (n, 4) with format [x_norm, is_sin, is_cos, is_tan]
 
         Returns:
-            NumPy array of predictions
+            NumPy array of predictions (always float32)
         """
         input_details = self.interpreter.get_input_details()
         output_details = self.interpreter.get_output_details()
@@ -86,15 +114,24 @@ class TFLiteModelEvaluator:
         predictions = []
 
         for i in range(len(x_input)):
-            # Prepare input (ensure correct shape and type)
-            input_data = x_input[i:i+1].astype(input_details[0]['dtype'])
+            input_data = x_input[i:i+1]
+
+            # Quantize input if model expects int8
+            if self.is_quantized and input_details[0]['dtype'] == np.int8:
+                input_data = (input_data / self.input_scale + self.input_zero_point).astype(np.int8)
+            else:
+                input_data = input_data.astype(input_details[0]['dtype'])
 
             # Run inference
             self.interpreter.set_tensor(input_details[0]['index'], input_data)
             self.interpreter.invoke()
-            output = self.interpreter.get_tensor(output_details[0]['index'])
+            output = self.interpreter.get_tensor(output_details[0]['index'])[0][0]
 
-            predictions.append(output[0][0])
+            # Dequantize output if model returns int8
+            if self.is_quantized and output_details[0]['dtype'] == np.int8:
+                output = (output.astype(np.float32) - self.output_zero_point) * self.output_scale
+
+            predictions.append(output)
 
         return np.array(predictions)
 
@@ -174,21 +211,33 @@ class TFLiteModelEvaluator:
         # Calculate absolute errors
         abs_errors = np.abs(y_test - y_pred)
 
-        # Calculate relative errors with safeguard for near-zero values
-        # Use relative error for |true| > 0.01, otherwise use absolute error
-        threshold = 0.01
-        relative_errors = np.where(
-            np.abs(y_test) > threshold,
-            abs_errors / np.abs(y_test),  # Relative error: |pred - true| / |true|
-            abs_errors                     # Absolute error for values near zero
+        # Calculate relative errors (percentage)
+        # Avoid division by zero - use absolute error for very small values
+        safe_relative_errors = np.where(
+            np.abs(y_test) > 0.01,
+            (abs_errors / np.abs(y_test)) * 100,  # Relative error as percentage
+            abs_errors * 100  # For near-zero values, treat absolute error as percentage
         )
 
+        # Two accuracy metrics:
+        # 1. Absolute accuracy: what % of predictions are within 0.05 absolute error
+        absolute_accuracy = np.mean(abs_errors < 0.05) * 100
+
+        # 2. Relative accuracy: what % of predictions are within tolerance% relative error
+        # (only for values where |true| > 0.01)
+        mask_non_zero = np.abs(y_test) > 0.01
+        if np.sum(mask_non_zero) > 0:
+            rel_errors_non_zero = (abs_errors[mask_non_zero] / np.abs(y_test[mask_non_zero])) * 100
+            relative_accuracy = np.mean(rel_errors_non_zero < (tolerance * 100)) * 100
+        else:
+            relative_accuracy = 100.0
+
         # Overall metrics
-        overall_accuracy = np.mean(relative_errors < tolerance) * 100
+        overall_accuracy = absolute_accuracy  # Use absolute accuracy as primary metric
         overall_mae = np.mean(abs_errors)
         overall_max_error = np.max(abs_errors)
         overall_rmse = np.sqrt(np.mean(abs_errors ** 2))
-        overall_mean_rel_error = np.mean(relative_errors) * 100  # as percentage
+        overall_mean_rel_error = np.mean(safe_relative_errors)  # as percentage
 
         results = {
             'overall': {
@@ -209,16 +258,27 @@ class TFLiteModelEvaluator:
                 func_y_test = y_test[mask]
                 func_y_pred = y_pred[mask]
                 func_abs_errors = abs_errors[mask]
-                func_rel_errors = relative_errors[mask]
 
-                func_accuracy = np.mean(func_rel_errors < tolerance) * 100
+                # Calculate absolute accuracy for this function
+                func_abs_accuracy = np.mean(func_abs_errors < 0.05) * 100
+
+                # Calculate relative accuracy (only for non-zero values)
+                func_mask_non_zero = np.abs(func_y_test) > 0.01
+                if np.sum(func_mask_non_zero) > 0:
+                    func_rel_err = (func_abs_errors[func_mask_non_zero] / np.abs(func_y_test[func_mask_non_zero])) * 100
+                    func_rel_accuracy = np.mean(func_rel_err < (tolerance * 100)) * 100
+                    func_mean_rel_error = np.mean(func_rel_err)
+                else:
+                    func_rel_accuracy = 100.0
+                    func_mean_rel_error = 0.0
+
                 func_mae = np.mean(func_abs_errors)
                 func_max_error = np.max(func_abs_errors)
                 func_rmse = np.sqrt(np.mean(func_abs_errors ** 2))
-                func_mean_rel_error = np.mean(func_rel_errors) * 100
 
                 results[func_name] = {
-                    'accuracy': func_accuracy,
+                    'accuracy': func_abs_accuracy,  # Use absolute accuracy
+                    'relative_accuracy': func_rel_accuracy,
                     'mae': func_mae,
                     'max_error': func_max_error,
                     'rmse': func_rmse,
@@ -236,7 +296,7 @@ class TFLiteModelEvaluator:
             if func_name in results:
                 r = results[func_name]
                 print(f"{func_name}(x):")
-                print(f"  Accuracy: {r['accuracy']:.2f}% (within {tolerance*100:.0f}% relative error)")
+                print(f"  Accuracy: {r['accuracy']:.2f}% (within 0.05 absolute error)")
                 print(f"  Mean Relative Error: {r['mean_rel_error']:.2f}%")
                 print(f"  MAE: {r['mae']:.6f}")
                 print(f"  RMSE: {r['rmse']:.6f}")
@@ -247,7 +307,7 @@ class TFLiteModelEvaluator:
         # Overall results
         r = results['overall']
         print(f"Overall Performance:")
-        print(f"  Accuracy: {r['accuracy']:.2f}% (within {tolerance*100:.0f}% relative error)")
+        print(f"  Accuracy: {r['accuracy']:.2f}% (within 0.05 absolute error)")
         print(f"  Mean Relative Error: {r['mean_rel_error']:.2f}%")
         print(f"  MAE: {r['mae']:.6f}")
         print(f"  RMSE: {r['rmse']:.6f}")
@@ -269,7 +329,7 @@ class TFLiteModelEvaluator:
                 true_val = y_test[i]
                 pred_val = y_pred[i]
                 abs_err = abs_errors[i]
-                rel_err = relative_errors[i] * 100
+                rel_err = safe_relative_errors[i]
 
                 print(f"{func:<6} {x_denorm:>7.3f} {true_val:>9.5f} {pred_val:>9.5f} {abs_err:>9.5f} {rel_err:>9.2f}")
 
