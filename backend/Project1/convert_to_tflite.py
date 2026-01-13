@@ -23,23 +23,20 @@ Usage:
     python convert_to_tflite.py --model path/to/model.keras --output out/
 """
 
-# Think of these as toolboxes we need to use:
-import tensorflow as tf  # The AI brain toolkit - helps us work with our smart model
-import numpy as np  # Math helper - does calculations with lots of numbers at once
-import argparse  # Command reader - understands what you type in the terminal
-import os  # File organizer - helps us find and save files on the computer
-import sys  # System controller - can stop the program if something goes wrong
-from pathlib import Path  # Path helper - makes working with file locations easier
+import tensorflow as tf
+import numpy as np
+import argparse
+import os
+import sys
+from pathlib import Path
 
 
 class TFLiteConverter:
     """Converts TensorFlow models to TensorFlow Lite for Arduino."""
     
-    # These are like size limits for our Arduino board - think of it like:
-    # FLASH = long-term storage (like a backpack that holds 1 MB)
-    # RAM = quick memory (like hands that can hold 256 KB)
-    ARDUINO_FLASH_MB = 1.0  # Our Arduino can store 1 megabyte of model
-    ARDUINO_RAM_KB = 256  # Our Arduino has 256 kilobytes of working memory
+    # Arduino Nano 33 BLE Sense Rev2 hardware constraints
+    ARDUINO_FLASH_MB = 1.0  # Flash storage limit for model
+    ARDUINO_RAM_KB = 256  # RAM available during inference
     
     def __init__(self, model_path, verbose=True):
         """
@@ -61,19 +58,16 @@ class TFLiteConverter:
     
     def _load_model(self):
         """Load the TensorFlow/Keras model."""
-        # This is like opening a saved game - we're loading our trained AI model from a file
         self._log(f"\n{'='*70}")
         self._log("Loading TensorFlow Model")
         self._log(f"{'='*70}")
         
         try:
-            # Sometimes files are saved in different ways, so we try multiple methods
-            # Think of it like trying different keys to open a locked box
+            # Try multiple loading strategies for compatibility
             import os
             
-            # Strategy 1: Try the simple way - just load the model without extra stuff
+            # Strategy 1: Load with compile=False to skip optimizer loading
             try:
-                # compile=False means "don't worry about how to train it, just load it"
                 self.model = tf.keras.models.load_model(self.model_path, compile=False)
                 self._log(f"✓ Model loaded (without compilation) from: {self.model_path}")
             except Exception as e1:
@@ -105,16 +99,14 @@ class TFLiteConverter:
                 except Exception as e2:
                     raise Exception(f"All loading strategies failed. Original error: {e1}")
             
-            # Show information about our model - like reading a recipe card
+            # Display model info
             if self.verbose and hasattr(self.model, 'summary'):
                 self._log("\nModel Architecture:")
-                self.model.summary()  # This shows all the layers (parts) of our AI brain
+                self.model.summary()
                 
-                # Count how many numbers (parameters) our model has
                 if hasattr(self.model, 'count_params'):
-                    total_params = self.model.count_params()  # Count all the number dials in our model
-                    # Calculate size: each number takes 4 bytes of space
-                    size_mb = (total_params * 4) / (1024 * 1024)  # Convert bytes to megabytes
+                    total_params = self.model.count_params()
+                    size_mb = (total_params * 4) / (1024 * 1024)  # float32 = 4 bytes
                     self._log(f"\nModel Statistics:")
                     self._log(f"  Total parameters: {total_params:,}")
                     self._log(f"  Estimated size: {size_mb:.3f} MB")
@@ -132,6 +124,12 @@ class TFLiteConverter:
         """
         Convert model to TensorFlow Lite format.
         
+        Conversion process:
+        1. Creates TFLite converter from Keras model
+        2. Applies optimizations (removes unnecessary ops, fuses layers)
+        3. Optional: Quantizes weights from float32 to int8 using representative data
+        4. Serializes to FlatBuffer format for embedded deployment
+        
         Args:
             optimize: Apply default optimizations (reduce size, improve speed)
             quantize: Apply int8 quantization (requires representative_data)
@@ -140,24 +138,20 @@ class TFLiteConverter:
         Returns:
             TFLite model as bytes
         """
-        # This is the MAIN MAGIC STEP! We're shrinking our big AI model to fit on tiny Arduino
-        # Think of it like packing a suitcase - we're making it smaller but keeping what's important
         self._log(f"\n{'='*70}")
         self._log("Converting to TensorFlow Lite")
         self._log(f"{'='*70}")
         
-        # Create our converter tool - this is what will shrink our model
         converter = tf.lite.TFLiteConverter.from_keras_model(self.model)
         
-        # Make the model smaller and faster - like compressing a photo
         if optimize:
             self._log("✓ Applying default optimizations...")
-            # This tells the converter to remove unnecessary stuff and make things smaller
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
         
-        # Make the model EVEN SMALLER by using smaller numbers (quantization)
-        # Instead of using big precise numbers, we use smaller approximate numbers
-        # Like saying "about 5" instead of "5.0000000001"
+        # QUANTIZATION: Converts 32-bit floats to 8-bit integers
+        # Process: Uses representative_data to determine min/max ranges for each tensor,
+        # then maps float values to int8 range [-128, 127]
+        # Result: 4x smaller model, faster inference, slight accuracy loss
         if quantize:
             if representative_data is None:
                 print("✗ Error: Quantization requires representative data")
@@ -165,13 +159,12 @@ class TFLiteConverter:
             
             self._log("✓ Applying int8 quantization...")
             
-            # We need to give the converter some example data so it knows what numbers to expect
-            # This is like showing someone sample problems so they know what to prepare for
+            # Representative dataset: Converter runs inference on these samples to observe
+            # the range of activations, then calculates optimal scale/zero-point for quantization
             def representative_dataset():
-                # Give it up to 100 examples from our data
                 for i in range(min(100, len(representative_data))):
-                    sample = representative_data[i:i+1]  # Get one example
-                    yield [sample.astype(np.float32)]  # Give it to the converter
+                    sample = representative_data[i:i+1]
+                    yield [sample.astype(np.float32)]
             
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
             converter.representative_dataset = representative_dataset
@@ -179,22 +172,18 @@ class TFLiteConverter:
             converter.inference_input_type = tf.int8
             converter.inference_output_type = tf.int8
         
-        # NOW DO THE ACTUAL CONVERSION! This is where the magic happens!
         try:
-            tflite_model = converter.convert()  # Transform our big model into a tiny one!
+            tflite_model = converter.convert()
             self._log(f"✓ Conversion successful!")
             
-            # Check how big our new tiny model is
-            size_kb = len(tflite_model) / 1024  # Convert from bytes to kilobytes
-            size_mb = size_kb / 1024  # Convert from kilobytes to megabytes
+            size_kb = len(tflite_model) / 1024
+            size_mb = size_kb / 1024
             self._log(f"\nTFLite Model Size:")
             self._log(f"  Size: {size_kb:.2f} KB ({size_mb:.3f} MB)")
             
-            # Check if our model will fit on the Arduino - like checking if clothes fit in a suitcase
             if size_mb < self.ARDUINO_FLASH_MB:
                 self._log(f"  ✓ Fits in Arduino flash ({self.ARDUINO_FLASH_MB} MB available)")
             else:
-                # Uh oh! Too big! Like trying to fit an elephant in a car
                 self._log(f"  ✗ May be too large for Arduino flash!")
                 self._log(f"    Consider enabling quantization to reduce size")
             
@@ -212,13 +201,10 @@ class TFLiteConverter:
             tflite_model: TFLite model bytes
             output_path: Path to save the .tflite file
         """
-        # Create the folder if it doesn't exist - like making a new drawer for storage
         os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
         
-        # Save our tiny model to a file - like saving a game
-        # 'wb' means "write binary" - we're saving raw computer data
         with open(output_path, 'wb') as f:
-            f.write(tflite_model)  # Write the model data to the file
+            f.write(tflite_model)
         
         self._log(f"\n✓ TFLite model saved: {output_path}")
     
@@ -226,26 +212,28 @@ class TFLiteConverter:
         """
         Generate C header file for Arduino.
         
+        C Array Conversion Process:
+        1. Converts TFLite model bytes to hexadecimal literals (0x00, 0x01, etc.)
+        2. Formats as const unsigned char array (stored in program flash, not RAM)
+        3. Adds header guards to prevent multiple inclusion
+        4. Creates length constant for array bounds checking
+        
+        Result: Model embedded directly in Arduino sketch as compile-time constant
+        
         Args:
             tflite_model: TFLite model bytes
             output_path: Path to save the .h file
             array_name: Name of the C array variable
         """
-        # Arduino speaks a language called C, not Python!
-        # So we need to translate our model into C language - like translating Spanish to English
         self._log(f"\n{'='*70}")
         self._log("Generating C Header for Arduino")
         self._log(f"{'='*70}")
         
-        # Create folder if needed
         os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
         
-        # Convert each byte of our model to hexadecimal format (0x00, 0x01, etc.)
-        # Think of this like writing numbers in a special computer code that Arduino understands
+        # Convert model bytes to C hex array format
         hex_array = [f"0x{byte:02x}" for byte in tflite_model]
         
-        # Create the text for our C header file
-        # This is like writing a letter that Arduino can read
         header_content = f"""// Auto-generated TensorFlow Lite model for Arduino
 // Generated: {self._get_timestamp()}
 // Model size: {len(tflite_model)} bytes ({len(tflite_model)/1024:.2f} KB)
@@ -254,17 +242,15 @@ class TFLiteConverter:
 #ifndef {array_name.upper()}_H
 #define {array_name.upper()}_H
 
-// Model data array - this is our AI brain stored as a list of numbers!
+// Model data array (stored in flash memory)
 const unsigned char {array_name}[] = {{
 """
         
-        # Write all the model numbers in neat rows - like organizing crayons in a box
-        # We put 12 numbers on each line to keep it readable
+        # Format as 12 bytes per line for readability
         for i in range(0, len(hex_array), 12):
-            row = ", ".join(hex_array[i:i+12])  # Join 12 numbers with commas
-            # Add comma at end unless it's the last row (grammar rules!)
+            row = ", ".join(hex_array[i:i+12])
             comma = "," if i + 12 < len(hex_array) else ""
-            header_content += f"  {row}{comma}\n"  # Add this row to our file
+            header_content += f"  {row}{comma}\n"
         
         header_content += f"""
 }};
@@ -296,47 +282,38 @@ const unsigned int {array_name}_len = {len(tflite_model)};
             test_data_y: Test output data (numpy array, optional)
             num_samples: Number of samples to test
         """
-        # Time to test if our tiny model works! Like testing a toy after building it
         self._log(f"\n{'='*70}")
         self._log("Testing TFLite Model")
         self._log(f"{'='*70}")
         
-        # Create an interpreter - this is like a translator that runs our tiny model
         interpreter = tf.lite.Interpreter(model_content=tflite_model)
-        interpreter.allocate_tensors()  # Set up memory space for the model to work
+        interpreter.allocate_tensors()
         
-        # Find out what kind of data our model expects and returns
-        # Like reading the instructions: "Put 4 numbers in, get 1 number out"
         input_details = interpreter.get_input_details()
         output_details = interpreter.get_output_details()
         
         self._log(f"\nModel I/O Details:")
-        self._log(f"  Input shape: {input_details[0]['shape']}")  # How many numbers go IN
-        self._log(f"  Input type: {input_details[0]['dtype'].__name__}")  # What type of numbers
-        self._log(f"  Output shape: {output_details[0]['shape']}")  # How many numbers come OUT
-        self._log(f"  Output type: {output_details[0]['dtype'].__name__}")  # What type of numbers
+        self._log(f"  Input shape: {input_details[0]['shape']}")
+        self._log(f"  Input type: {input_details[0]['dtype'].__name__}")
+        self._log(f"  Output shape: {output_details[0]['shape']}")
+        self._log(f"  Output type: {output_details[0]['dtype'].__name__}")
         
-        # Now let's test some examples and see if our tiny model gives the same answers!
-        # Like comparing a copy to the original to see if it's accurate
         num_test = min(num_samples, len(test_data_x))
         self._log(f"\nRunning inference on {num_test} samples:")
         self._log("-" * 70)
         
-        # Lists to store predictions from both models
-        tflite_predictions = []  # Answers from our tiny model
-        original_predictions = []  # Answers from the original big model
+        tflite_predictions = []
+        original_predictions = []
         
-        # Test each example one by one
         for i in range(num_test):
-            # Get one test example and make sure it's in the right format
             input_data = test_data_x[i:i+1].astype(input_details[0]['dtype'])
             
-            # Ask the TINY model for an answer
-            interpreter.set_tensor(input_details[0]['index'], input_data)  # Give it the question
-            interpreter.invoke()  # Tell it to think and calculate
-            tflite_output = interpreter.get_tensor(output_details[0]['index'])  # Get the answer
+            # TFLite inference
+            interpreter.set_tensor(input_details[0]['index'], input_data)
+            interpreter.invoke()
+            tflite_output = interpreter.get_tensor(output_details[0]['index'])
             
-            # Ask the ORIGINAL big model for an answer (to compare)
+            # Original model inference for comparison
             original_output = self.model.predict(test_data_x[i:i+1], verbose=0)
             
             tflite_predictions.append(tflite_output[0][0])
@@ -357,16 +334,15 @@ const unsigned int {array_name}_len = {len(tflite_model)};
                          f"TFLite={tflite_output[0][0]:.4f} | "
                          f"Original={original_output[0][0]:.4f}")
         
-        # Compare how different the tiny model's answers are from the original
-        # Like checking how close a photocopy is to the original photo
+        # Calculate accuracy metrics
         tflite_predictions = np.array(tflite_predictions)
         original_predictions = np.array(original_predictions)
-        diff = np.abs(tflite_predictions - original_predictions)  # Calculate differences
+        diff = np.abs(tflite_predictions - original_predictions)
         
         self._log("-" * 70)
         self._log(f"\nTFLite vs Original Model:")
-        self._log(f"  Mean absolute difference: {np.mean(diff):.6f}")  # Average difference
-        self._log(f"  Max absolute difference: {np.max(diff):.6f}")  # Biggest difference
+        self._log(f"  Mean absolute difference: {np.mean(diff):.6f}")
+        self._log(f"  Max absolute difference: {np.max(diff):.6f}")
         
         if np.mean(diff) < 0.001:
             self._log("  ✓ TFLite model is highly accurate!")
@@ -387,31 +363,26 @@ def generate_trig_test_data(num_samples=100):
     Input: [x_normalized, is_sin, is_cos, is_tan]
     Output: trig function value
     """
-    # Create test data for our trig (sin, cos, tan) functions
-    # This is like making practice problems to test if our model learned correctly
-    x_base = np.linspace(-3.14, 3.14, num_samples)  # Create evenly spaced numbers from -π to π
-    X_samples = []  # List to store input questions
-    y_samples = []  # List to store correct answers
+    x_base = np.linspace(-3.14, 3.14, num_samples)
+    X_samples = []
+    y_samples = []
     
-    # Create test examples for all three trig functions: sin, cos, and tan
     for x_val in x_base:
-        # Squish the number to be between 0 and 1 (normalization)
         x_norm = (x_val + 3.14) / (2 * 3.14)  # Normalize to [0, 1]
         
-        # Test sin: input is [x, 1, 0, 0] where the 1 means "calculate sine"
+        # sin: [x, 1, 0, 0]
         X_samples.append([x_norm, 1, 0, 0])
-        y_samples.append(np.sin(x_val))  # The correct answer
+        y_samples.append(np.sin(x_val))
         
-        # Test cos: input is [x, 0, 1, 0] where the 1 means "calculate cosine"
+        # cos: [x, 0, 1, 0]
         X_samples.append([x_norm, 0, 1, 0])
-        y_samples.append(np.cos(x_val))  # The correct answer
+        y_samples.append(np.cos(x_val))
         
-        # Test tan: input is [x, 0, 0, 1] where the 1 means "calculate tangent"
-        # Only test tan when the answer isn't crazy big (avoid infinity)
+        # tan: [x, 0, 0, 1] (safe regions only)
         tan_val = np.tan(x_val)
-        if np.abs(tan_val) < 3:  # Only if the answer is reasonable
+        if np.abs(tan_val) < 3:
             X_samples.append([x_norm, 0, 0, 1])
-            y_samples.append(tan_val)  # The correct answer
+            y_samples.append(tan_val)
     
     return np.array(X_samples, dtype=np.float32), np.array(y_samples, dtype=np.float32)
 
