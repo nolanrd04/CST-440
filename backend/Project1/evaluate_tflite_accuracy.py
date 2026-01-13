@@ -35,6 +35,11 @@ class TFLiteModelEvaluator:
         """
         self.model_path = model_path
         self.interpreter = None
+        self.is_quantized = False
+        self.input_scale = None
+        self.input_zero_point = None
+        self.output_scale = None
+        self.output_zero_point = None
         self._load_model()
 
     def _load_model(self):
@@ -62,6 +67,29 @@ class TFLiteModelEvaluator:
             print(f"  Output shape: {output_details[0]['shape']}")
             print(f"  Output type: {output_details[0]['dtype'].__name__}")
 
+            # Check if model is quantized
+            input_dtype = input_details[0]['dtype']
+            output_dtype = output_details[0]['dtype']
+
+            if input_dtype == np.int8 or output_dtype == np.int8:
+                self.is_quantized = True
+
+                # Get quantization parameters
+                input_quant = input_details[0]['quantization_parameters']
+                output_quant = output_details[0]['quantization_parameters']
+
+                self.input_scale = input_quant['scales'][0]
+                self.input_zero_point = input_quant['zero_points'][0]
+                self.output_scale = output_quant['scales'][0]
+                self.output_zero_point = output_quant['zero_points'][0]
+
+                print(f"\n⚠️  QUANTIZED MODEL DETECTED")
+                print(f"  Input quantization: scale={self.input_scale:.6f}, zero_point={self.input_zero_point}")
+                print(f"  Output quantization: scale={self.output_scale:.6f}, zero_point={self.output_zero_point}")
+                print(f"  Using automatic quantization-aware inference")
+            else:
+                print(f"\n✓ Float32 model (not quantized)")
+
             # Get model size
             size_bytes = os.path.getsize(self.model_path)
             print(f"  Model size: {size_bytes:,} bytes ({size_bytes/1024:.2f} KB)")
@@ -72,13 +100,13 @@ class TFLiteModelEvaluator:
 
     def predict(self, x_input):
         """
-        Run inference on input data.
+        Run inference on input data with automatic quantization handling.
 
         Args:
             x_input: NumPy array of shape (n, 4) with format [x_norm, is_sin, is_cos, is_tan]
 
         Returns:
-            NumPy array of predictions
+            NumPy array of predictions (always float32)
         """
         input_details = self.interpreter.get_input_details()
         output_details = self.interpreter.get_output_details()
@@ -86,15 +114,24 @@ class TFLiteModelEvaluator:
         predictions = []
 
         for i in range(len(x_input)):
-            # Prepare input (ensure correct shape and type)
-            input_data = x_input[i:i+1].astype(input_details[0]['dtype'])
+            input_data = x_input[i:i+1]
+
+            # Quantize input if model expects int8
+            if self.is_quantized and input_details[0]['dtype'] == np.int8:
+                input_data = (input_data / self.input_scale + self.input_zero_point).astype(np.int8)
+            else:
+                input_data = input_data.astype(input_details[0]['dtype'])
 
             # Run inference
             self.interpreter.set_tensor(input_details[0]['index'], input_data)
             self.interpreter.invoke()
-            output = self.interpreter.get_tensor(output_details[0]['index'])
+            output = self.interpreter.get_tensor(output_details[0]['index'])[0][0]
 
-            predictions.append(output[0][0])
+            # Dequantize output if model returns int8
+            if self.is_quantized and output_details[0]['dtype'] == np.int8:
+                output = (output.astype(np.float32) - self.output_zero_point) * self.output_scale
+
+            predictions.append(output)
 
         return np.array(predictions)
 
