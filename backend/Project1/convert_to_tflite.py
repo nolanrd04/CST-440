@@ -34,9 +34,9 @@ from pathlib import Path
 class TFLiteConverter:
     """Converts TensorFlow models to TensorFlow Lite for Arduino."""
     
-    # Arduino Nano 33 BLE Sense Rev2 specifications
-    ARDUINO_FLASH_MB = 1.0
-    ARDUINO_RAM_KB = 256
+    # Arduino Nano 33 BLE Sense Rev2 hardware constraints
+    ARDUINO_FLASH_MB = 1.0  # Flash storage limit for model
+    ARDUINO_RAM_KB = 256  # RAM available during inference
     
     def __init__(self, model_path, verbose=True):
         """
@@ -66,7 +66,7 @@ class TFLiteConverter:
             # Try multiple loading strategies for compatibility
             import os
             
-            # Strategy 1: Try with compile=False to skip optimizer loading
+            # Strategy 1: Load with compile=False to skip optimizer loading
             try:
                 self.model = tf.keras.models.load_model(self.model_path, compile=False)
                 self._log(f"✓ Model loaded (without compilation) from: {self.model_path}")
@@ -124,6 +124,12 @@ class TFLiteConverter:
         """
         Convert model to TensorFlow Lite format.
         
+        Conversion process:
+        1. Creates TFLite converter from Keras model
+        2. Applies optimizations (removes unnecessary ops, fuses layers)
+        3. Optional: Quantizes weights from float32 to int8 using representative data
+        4. Serializes to FlatBuffer format for embedded deployment
+        
         Args:
             optimize: Apply default optimizations (reduce size, improve speed)
             quantize: Apply int8 quantization (requires representative_data)
@@ -136,15 +142,16 @@ class TFLiteConverter:
         self._log("Converting to TensorFlow Lite")
         self._log(f"{'='*70}")
         
-        # Initialize converter
         converter = tf.lite.TFLiteConverter.from_keras_model(self.model)
         
-        # Apply optimizations
         if optimize:
             self._log("✓ Applying default optimizations...")
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
         
-        # Apply quantization
+        # QUANTIZATION: Converts 32-bit floats to 8-bit integers
+        # Process: Uses representative_data to determine min/max ranges for each tensor,
+        # then maps float values to int8 range [-128, 127]
+        # Result: 4x smaller model, faster inference, slight accuracy loss
         if quantize:
             if representative_data is None:
                 print("✗ Error: Quantization requires representative data")
@@ -152,7 +159,8 @@ class TFLiteConverter:
             
             self._log("✓ Applying int8 quantization...")
             
-            # Create representative dataset generator
+            # Representative dataset: Converter runs inference on these samples to observe
+            # the range of activations, then calculates optimal scale/zero-point for quantization
             def representative_dataset():
                 for i in range(min(100, len(representative_data))):
                     sample = representative_data[i:i+1]
@@ -164,18 +172,15 @@ class TFLiteConverter:
             converter.inference_input_type = tf.int8
             converter.inference_output_type = tf.int8
         
-        # Convert
         try:
             tflite_model = converter.convert()
             self._log(f"✓ Conversion successful!")
             
-            # Display size info
             size_kb = len(tflite_model) / 1024
             size_mb = size_kb / 1024
             self._log(f"\nTFLite Model Size:")
             self._log(f"  Size: {size_kb:.2f} KB ({size_mb:.3f} MB)")
             
-            # Check Arduino constraints
             if size_mb < self.ARDUINO_FLASH_MB:
                 self._log(f"  ✓ Fits in Arduino flash ({self.ARDUINO_FLASH_MB} MB available)")
             else:
@@ -207,6 +212,14 @@ class TFLiteConverter:
         """
         Generate C header file for Arduino.
         
+        C Array Conversion Process:
+        1. Converts TFLite model bytes to hexadecimal literals (0x00, 0x01, etc.)
+        2. Formats as const unsigned char array (stored in program flash, not RAM)
+        3. Adds header guards to prevent multiple inclusion
+        4. Creates length constant for array bounds checking
+        
+        Result: Model embedded directly in Arduino sketch as compile-time constant
+        
         Args:
             tflite_model: TFLite model bytes
             output_path: Path to save the .h file
@@ -218,10 +231,9 @@ class TFLiteConverter:
         
         os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
         
-        # Convert to hex array
+        # Convert model bytes to C hex array format
         hex_array = [f"0x{byte:02x}" for byte in tflite_model]
         
-        # Create header content
         header_content = f"""// Auto-generated TensorFlow Lite model for Arduino
 // Generated: {self._get_timestamp()}
 // Model size: {len(tflite_model)} bytes ({len(tflite_model)/1024:.2f} KB)
@@ -230,14 +242,13 @@ class TFLiteConverter:
 #ifndef {array_name.upper()}_H
 #define {array_name.upper()}_H
 
-// Model data array
+// Model data array (stored in flash memory)
 const unsigned char {array_name}[] = {{
 """
         
-        # Write array data (12 bytes per line for readability)
+        # Format as 12 bytes per line for readability
         for i in range(0, len(hex_array), 12):
             row = ", ".join(hex_array[i:i+12])
-            # Add comma at end unless it's the last row
             comma = "," if i + 12 < len(hex_array) else ""
             header_content += f"  {row}{comma}\n"
         
@@ -275,11 +286,9 @@ const unsigned int {array_name}_len = {len(tflite_model)};
         self._log("Testing TFLite Model")
         self._log(f"{'='*70}")
         
-        # Initialize TFLite interpreter
         interpreter = tf.lite.Interpreter(model_content=tflite_model)
         interpreter.allocate_tensors()
         
-        # Get input/output details
         input_details = interpreter.get_input_details()
         output_details = interpreter.get_output_details()
         
@@ -289,7 +298,6 @@ const unsigned int {array_name}_len = {len(tflite_model)};
         self._log(f"  Output shape: {output_details[0]['shape']}")
         self._log(f"  Output type: {output_details[0]['dtype'].__name__}")
         
-        # Test predictions
         num_test = min(num_samples, len(test_data_x))
         self._log(f"\nRunning inference on {num_test} samples:")
         self._log("-" * 70)
@@ -298,7 +306,6 @@ const unsigned int {array_name}_len = {len(tflite_model)};
         original_predictions = []
         
         for i in range(num_test):
-            # Prepare input
             input_data = test_data_x[i:i+1].astype(input_details[0]['dtype'])
             
             # TFLite inference
@@ -306,7 +313,7 @@ const unsigned int {array_name}_len = {len(tflite_model)};
             interpreter.invoke()
             tflite_output = interpreter.get_tensor(output_details[0]['index'])
             
-            # Original model inference
+            # Original model inference for comparison
             original_output = self.model.predict(test_data_x[i:i+1], verbose=0)
             
             tflite_predictions.append(tflite_output[0][0])
@@ -327,7 +334,7 @@ const unsigned int {array_name}_len = {len(tflite_model)};
                          f"TFLite={tflite_output[0][0]:.4f} | "
                          f"Original={original_output[0][0]:.4f}")
         
-        # Calculate differences
+        # Calculate accuracy metrics
         tflite_predictions = np.array(tflite_predictions)
         original_predictions = np.array(original_predictions)
         diff = np.abs(tflite_predictions - original_predictions)
@@ -360,19 +367,18 @@ def generate_trig_test_data(num_samples=100):
     X_samples = []
     y_samples = []
     
-    # Generate test samples for all three functions
     for x_val in x_base:
         x_norm = (x_val + 3.14) / (2 * 3.14)  # Normalize to [0, 1]
         
-        # sin
+        # sin: [x, 1, 0, 0]
         X_samples.append([x_norm, 1, 0, 0])
         y_samples.append(np.sin(x_val))
         
-        # cos
+        # cos: [x, 0, 1, 0]
         X_samples.append([x_norm, 0, 1, 0])
         y_samples.append(np.cos(x_val))
         
-        # tan (safe regions only)
+        # tan: [x, 0, 0, 1] (safe regions only)
         tan_val = np.tan(x_val)
         if np.abs(tan_val) < 3:
             X_samples.append([x_norm, 0, 0, 1])
