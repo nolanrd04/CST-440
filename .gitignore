@@ -2,3 +2,4 @@ venv/
 */venv/
 .venv/
 PersonalProjects/
+.DS_Store
