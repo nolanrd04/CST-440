@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sudo chmod:*)",
+      "Bash(timeout 30 cat:*)"
+    ]
+  }
+}
