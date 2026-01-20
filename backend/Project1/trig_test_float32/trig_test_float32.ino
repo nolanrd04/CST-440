@@ -73,64 +73,45 @@ void setup() {
 }
 
 void loop() {
-  // Test angles
-  float test_angles[] = {-3.14, -1.571, 0.0, 1.571, 3.14};
-  const char* labels[] = {"-pi", "-pi/2", "0", "pi/2", "pi"};
+  // 22 test angles within trained range [-3.14, 3.14]
+  const int num_tests = 22;
 
-  Serial.println("=== SIN Tests ===");
-  for (int i = 0; i < 5; i++) {
-    float x_val = test_angles[i];
+  Serial.println("DATA_START");
+
+  for (int i = 0; i < num_tests; i++) {
+    // Generate angle: -3.14 to 3.14 in equal steps
+    float x_val = -3.14f + (6.28f * i / (num_tests - 1));
     float x_norm = (x_val + 3.14f) / (2.0f * 3.14f);
 
-    // Float32 model - direct float input, no quantization
+    // Compute SIN
     input->data.f[0] = x_norm;
-    input->data.f[1] = 1.0f;  // is_sin
-    input->data.f[2] = 0.0f;  // is_cos
-
+    input->data.f[1] = 1.0f;
+    input->data.f[2] = 0.0f;
     interpreter->Invoke();
+    float sin_pred = output->data.f[0];
 
-    float pred = output->data.f[0];
-    float actual = sin(x_val);
-    float error = fabs(pred - actual);
+    // Compute COS
+    input->data.f[0] = x_norm;
+    input->data.f[1] = 0.0f;
+    input->data.f[2] = 1.0f;
+    interpreter->Invoke();
+    float cos_pred = output->data.f[0];
 
-    Serial.print("sin(");
-    Serial.print(labels[i]);
-    Serial.print("): pred=");
-    Serial.print(pred, 4);
-    Serial.print(", actual=");
-    Serial.print(actual, 4);
-    Serial.print(", error=");
-    Serial.println(error, 4);
+    // Derive TAN = SIN / COS
+    float tan_pred = (fabs(cos_pred) > 0.01f) ? sin_pred / cos_pred : 0.0f;
+
+    // Output CSV format: angle,sin_pred,cos_pred,tan_pred
+    Serial.print(x_val, 6);
+    Serial.print(",");
+    Serial.print(sin_pred, 6);
+    Serial.print(",");
+    Serial.print(cos_pred, 6);
+    Serial.print(",");
+    Serial.println(tan_pred, 6);
   }
 
-  Serial.println("\n=== COS Tests ===");
-  for (int i = 0; i < 5; i++) {
-    float x_val = test_angles[i];
-    float x_norm = (x_val + 3.14f) / (2.0f * 3.14f);
+  Serial.println("DATA_END");
 
-    input->data.f[0] = x_norm;
-    input->data.f[1] = 0.0f;  // is_sin
-    input->data.f[2] = 1.0f;  // is_cos
-
-    interpreter->Invoke();
-
-    float pred = output->data.f[0];
-    float actual = cos(x_val);
-    float error = fabs(pred - actual);
-
-    Serial.print("cos(");
-    Serial.print(labels[i]);
-    Serial.print("): pred=");
-    Serial.print(pred, 4);
-    Serial.print(", actual=");
-    Serial.print(actual, 4);
-    Serial.print(", error=");
-    Serial.println(error, 4);
-  }
-
-  Serial.println("\n=== Test Complete ===");
-  Serial.println("If errors are small (<0.05), float32 works.");
-  Serial.println("This means int8 quantization handling is broken.\n");
-  Serial.println("Waiting 30s...\n");
-  delay(30000);
+  // Wait before next run
+  delay(60000);
 }

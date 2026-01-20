@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(sudo chmod:*)",
-      "Bash(timeout 30 cat:*)"
+      "Bash(timeout 30 cat:*)",
+      "Bash(/home/sorenhaynes/Documents/GitHub/CST-440/bin/arduino-cli compile:*)",
+      "Bash(/home/sorenhaynes/Documents/GitHub/CST-440/bin/arduino-cli upload:*)"
     ]
   }
 }
