@@ -3,3 +3,8 @@ venv/
 .venv/
 PersonalProjects/
 .DS_Store
+backend/req.txt
+backend/check_gpu.py
+backend/Project1/create_simple_test_model.py
+backend/Project1/debug_arduino_values.py
+backend/Project1/simple_test/

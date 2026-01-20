@@ -1,19 +1,24 @@
+#include <Adafruit_TFLite.h>
+
 /*
  * Trigonometric Model Inference on Arduino Nano 33 BLE
  * CST-440 - Machine Learning on Microcontrollers
  *
  * This sketch runs inference on a TensorFlow Lite model that computes
  * trigonometric functions (sin, cos, tan) for a given input angle.
+ *
+ * Model uses 3 inputs: [x_normalized, is_sin, is_cos]
+ * tan(x) is derived as sin(x)/cos(x)
  */
 
-#include <Chirale_TensorFlowLite.h>
+#include <Adafruit_TensorFlowLite.h>
 #include <tensorflow/lite/micro/all_ops_resolver.h>
 #include <tensorflow/lite/micro/micro_interpreter.h>
 #include <tensorflow/lite/micro/micro_log.h>
 #include <tensorflow/lite/micro/system_setup.h>
 #include <tensorflow/lite/schema/schema_generated.h>
 
-#include "trig_model_all.h"
+#include "trig_model_int8_data.h"
 
 // TensorFlow Lite globals
 namespace {
@@ -23,28 +28,25 @@ namespace {
   TfLiteTensor* output = nullptr;
 
   // Memory allocation for TensorFlow Lite
-  // Float32 models need more memory than int8 (4x per value)
-  constexpr int kTensorArenaSize = 100 * 1024;  // 100KB for float32 model
+  constexpr int kTensorArenaSize = 50 * 1024;  // 50KB for int8 model
   alignas(16) uint8_t tensor_arena[kTensorArenaSize];
 }
 
 void setup() {
-  // Initialize serial communication
   Serial.begin(115200);
   while (!Serial) {
-    ; // Wait for serial port to connect
+    ;
   }
 
   Serial.println("========================================");
   Serial.println("TensorFlow Lite Trig Model - Arduino");
   Serial.println("CST-440 Project");
+  Serial.println("Model: INT8 Quantized (3 inputs)");
   Serial.println("========================================");
 
-  // Initialize TensorFlow Lite
   tflite::InitializeTarget();
 
-  // Load the TFLite model
-  model = tflite::GetModel(trig_model);
+  model = tflite::GetModel(trig_model_int8_tflite);
   if (model->version() != TFLITE_SCHEMA_VERSION) {
     Serial.print("Model schema version: ");
     Serial.println(model->version());
@@ -56,18 +58,14 @@ void setup() {
 
   Serial.println("Model loaded successfully!");
   Serial.print("Model size: ");
-  Serial.print(sizeof(trig_model));
+  Serial.print(trig_model_int8_tflite_len);
   Serial.println(" bytes");
 
-  // Set up the operations resolver
   static tflite::AllOpsResolver resolver;
-
-  // Build an interpreter to run the model
   static tflite::MicroInterpreter static_interpreter(
       model, resolver, tensor_arena, kTensorArenaSize);
   interpreter = &static_interpreter;
 
-  // Allocate memory from the tensor_arena for the model's tensors
   TfLiteStatus allocate_status = interpreter->AllocateTensors();
   if (allocate_status != kTfLiteOk) {
     Serial.println("ERROR: AllocateTensors() failed!");
@@ -76,44 +74,51 @@ void setup() {
 
   Serial.println("Tensors allocated successfully!");
 
-  // Get pointers to the model's input and output tensors
   input = interpreter->input(0);
   output = interpreter->output(0);
 
-  // Print input tensor info
-  Serial.println("\nInput Tensor Info:");
+  // Print input tensor info - CRITICAL FOR DEBUGGING
+  Serial.println("\n--- INPUT TENSOR INFO ---");
   Serial.print("  Dimensions: ");
   for (int i = 0; i < input->dims->size; i++) {
     Serial.print(input->dims->data[i]);
     if (i < input->dims->size - 1) Serial.print(" x ");
   }
   Serial.println();
-  Serial.print("  Type: ");
-  Serial.println(input->type);
+  Serial.print("  Type code: ");
+  Serial.print(input->type);
+  Serial.print(" (");
+  if (input->type == kTfLiteInt8) Serial.print("INT8");
+  else if (input->type == kTfLiteFloat32) Serial.print("FLOAT32");
+  else Serial.print("OTHER");
+  Serial.println(")");
 
   // Print output tensor info
-  Serial.println("\nOutput Tensor Info:");
+  Serial.println("\n--- OUTPUT TENSOR INFO ---");
   Serial.print("  Dimensions: ");
   for (int i = 0; i < output->dims->size; i++) {
     Serial.print(output->dims->data[i]);
     if (i < output->dims->size - 1) Serial.print(" x ");
   }
   Serial.println();
-  Serial.print("  Type: ");
-  Serial.println(output->type);
+  Serial.print("  Type code: ");
+  Serial.print(output->type);
+  Serial.print(" (");
+  if (output->type == kTfLiteInt8) Serial.print("INT8");
+  else if (output->type == kTfLiteFloat32) Serial.print("FLOAT32");
+  else Serial.print("OTHER");
+  Serial.println(")");
 
-  // Print quantization parameters if quantized
-  if (input->type == kTfLiteInt8) {
-    Serial.println("\nQuantization Info:");
-    Serial.print("  Input scale: ");
-    Serial.println(input->params.scale, 6);
-    Serial.print("  Input zero_point: ");
-    Serial.println(input->params.zero_point);
-    Serial.print("  Output scale: ");
-    Serial.println(output->params.scale, 6);
-    Serial.print("  Output zero_point: ");
-    Serial.println(output->params.zero_point);
-  }
+  // Print quantization parameters
+  Serial.println("\n--- QUANTIZATION PARAMETERS ---");
+  Serial.print("  Input scale: ");
+  Serial.println(input->params.scale, 8);
+  Serial.print("  Input zero_point: ");
+  Serial.println(input->params.zero_point);
+  Serial.print("  Output scale: ");
+  Serial.println(output->params.scale, 8);
+  Serial.print("  Output zero_point: ");
+  Serial.println(output->params.zero_point);
 
   Serial.println("\n========================================");
   Serial.println("Setup complete! Starting inference...");
@@ -123,143 +128,208 @@ void setup() {
 }
 
 void loop() {
-  // Test values: angles from 0 to 2π in steps of π/6
+  // Test using EXACT same range as Python training: [-3.14, 3.14]
+  // This matches: x_base = np.linspace(-3.14, 3.14, num_samples)
   const int num_tests = 13;
   const float test_angles[] = {
-    0.0, 0.523599, 1.047198, 1.570796, 2.094395, 2.617994,
-    3.141593, 3.665191, 4.18879, 4.712389, 5.235988, 5.759587, 6.283185
+    -3.14, -2.618, -2.094, -1.571, -1.047, -0.524,
+    0.0, 0.524, 1.047, 1.571, 2.094, 2.618, 3.14
   };
   const char* angle_labels[] = {
-    "0", "π/6", "π/3", "π/2", "2π/3", "5π/6",
-    "π", "7π/6", "4π/3", "3π/2", "5π/3", "11π/6", "2π"
+    "-pi", "-5pi/6", "-2pi/3", "-pi/2", "-pi/3", "-pi/6",
+    "0", "pi/6", "pi/3", "pi/2", "2pi/3", "5pi/6", "pi"
   };
 
+  // Accumulators for accuracy computation
+  float sin_total_error = 0;
+  float cos_total_error = 0;
+  float tan_total_error = 0;
+  int sin_correct = 0;  // Within 0.05 threshold
+  int cos_correct = 0;
+  int tan_correct = 0;
+  int tan_count = 0;  // tan has fewer valid samples
+
+  const float TOLERANCE = 0.05;
+
   for (int i = 0; i < num_tests; i++) {
-    float angle = test_angles[i];
+    float x_val = test_angles[i];
 
-    // Normalize angle to [0, 1] range as done in training
-    // Formula: (x + π) / (2π)
-    float x_normalized = (angle + 3.14159265359) / (2.0 * 3.14159265359);
+    // Normalize EXACTLY like Python: (x + 3.14) / (2 * 3.14)
+    float x_normalized = (x_val + 3.14f) / (2.0f * 3.14f);
 
-    // Helper function to set input based on tensor type
-    // Match Python's quantization: truncate, no rounding
+    // Debug: print normalized value and quantized inputs for first angle
+    if (i == 0) {
+      Serial.print("DEBUG: x_val=");
+      Serial.print(x_val, 4);
+      Serial.print(", x_normalized=");
+      Serial.println(x_normalized, 6);
+
+      // Show what int8 values we're sending
+      float q0 = x_normalized / input->params.scale + input->params.zero_point;
+      float q1 = 1.0f / input->params.scale + input->params.zero_point;  // is_sin=1
+      float q2 = 0.0f / input->params.scale + input->params.zero_point;  // is_cos=0
+      Serial.print("DEBUG quantized inputs: [");
+      Serial.print((int8_t)(int32_t)q0);
+      Serial.print(", ");
+      Serial.print((int8_t)(int32_t)q1);
+      Serial.print(", ");
+      Serial.print((int8_t)(int32_t)q2);
+      Serial.println("]");
+    }
+
+    // Helper to set input (handles both int8 and float32)
     auto setInput = [](TfLiteTensor* tensor, int idx, float value) {
       if (tensor->type == kTfLiteInt8) {
-        // Quantize exactly like Python: (value / scale + zero_point).astype(int8)
-        int32_t quantized_value = (int32_t)(value / tensor->params.scale + tensor->params.zero_point);
-        // Clamp to int8 range
-        if (quantized_value > 127) quantized_value = 127;
-        if (quantized_value < -128) quantized_value = -128;
-        tensor->data.int8[idx] = (int8_t)quantized_value;
+        // Quantize: q = value / scale + zero_point
+        float q = value / tensor->params.scale + tensor->params.zero_point;
+        int32_t quantized = (int32_t)q;
+        if (quantized > 127) quantized = 127;
+        if (quantized < -128) quantized = -128;
+        tensor->data.int8[idx] = (int8_t)quantized;
       } else {
         tensor->data.f[idx] = value;
       }
     };
 
-    // Helper function to get output based on tensor type
-    // Match Python's dequantization
+    // Helper to get output
     auto getOutput = [](TfLiteTensor* tensor, int idx) -> float {
       if (tensor->type == kTfLiteInt8) {
-        // Dequantize exactly like Python: (int8 - zero_point) * scale
-        return (static_cast<float>(tensor->data.int8[idx]) - static_cast<float>(tensor->params.zero_point)) * tensor->params.scale;
+        // Dequantize: value = (q - zero_point) * scale
+        return (float(tensor->data.int8[idx]) - float(tensor->params.zero_point)) * tensor->params.scale;
       } else {
         return tensor->data.f[idx];
       }
     };
 
-    // Run inference for SIN: input = [x_norm, 1, 0, 0]
+    // Run inference for SIN: input = [x_norm, 1, 0]
     setInput(input, 0, x_normalized);
-    setInput(input, 1, 1.0);  // is_sin
-    setInput(input, 2, 0.0);  // is_cos
-    setInput(input, 3, 0.0);  // is_tan
+    setInput(input, 1, 1.0f);
+    setInput(input, 2, 0.0f);
 
-    TfLiteStatus invoke_status = interpreter->Invoke();
-    if (invoke_status != kTfLiteOk) {
-      Serial.println("ERROR: Sin Invoke() failed!");
-      continue;
+    interpreter->Invoke();
+    float sin_pred = getOutput(output, 0);
+
+    // Debug: show raw int8 output for first angle
+    if (i == 0) {
+      Serial.print("DEBUG sin raw int8 output: ");
+      Serial.print(output->data.int8[0]);
+      Serial.print(" -> dequantized: ");
+      Serial.println(sin_pred, 4);
     }
-    float sin_output = getOutput(output, 0);
 
-    // Run inference for COS: input = [x_norm, 0, 1, 0]
+    // Run inference for COS: input = [x_norm, 0, 1]
     setInput(input, 0, x_normalized);
-    setInput(input, 1, 0.0);  // is_sin
-    setInput(input, 2, 1.0);  // is_cos
-    setInput(input, 3, 0.0);  // is_tan
+    setInput(input, 1, 0.0f);
+    setInput(input, 2, 1.0f);
 
-    invoke_status = interpreter->Invoke();
-    if (invoke_status != kTfLiteOk) {
-      Serial.println("ERROR: Cos Invoke() failed!");
-      continue;
+    interpreter->Invoke();
+    float cos_pred = getOutput(output, 0);
+
+    // Derive TAN = SIN / COS
+    float tan_pred = 0.0f;
+    bool tan_valid = false;
+    if (fabs(cos_pred) > 0.01f) {
+      tan_pred = sin_pred / cos_pred;
+      tan_valid = true;
     }
-    float cos_output = getOutput(output, 0);
 
-    // Run inference for TAN: input = [x_norm, 0, 0, 1]
-    setInput(input, 0, x_normalized);
-    setInput(input, 1, 0.0);  // is_sin
-    setInput(input, 2, 0.0);  // is_cos
-    setInput(input, 3, 1.0);  // is_tan
+    // Actual values
+    float sin_actual = sin(x_val);
+    float cos_actual = cos(x_val);
+    float tan_actual = tan(x_val);
 
-    invoke_status = interpreter->Invoke();
-    if (invoke_status != kTfLiteOk) {
-      Serial.println("ERROR: Tan Invoke() failed!");
-      continue;
+    // Calculate errors
+    float sin_err = fabs(sin_pred - sin_actual);
+    float cos_err = fabs(cos_pred - cos_actual);
+    float tan_err = fabs(tan_pred - tan_actual);
+
+    // Accumulate for accuracy
+    sin_total_error += sin_err;
+    cos_total_error += cos_err;
+    if (sin_err < TOLERANCE) sin_correct++;
+    if (cos_err < TOLERANCE) cos_correct++;
+
+    if (tan_valid && fabs(tan_actual) < 3.0f) {
+      tan_total_error += tan_err;
+      tan_count++;
+      if (tan_err < TOLERANCE) tan_correct++;
     }
-    float tan_output = getOutput(output, 0);
-
-    // Calculate actual values for comparison
-    float actual_sin = sin(angle);
-    float actual_cos = cos(angle);
-    float actual_tan = tan(angle);
-
-    // Helper function to print both absolute and relative error
-    auto printError = [](float predicted, float actual) {
-      float abs_error = abs(predicted - actual);
-      Serial.print("abs=");
-      Serial.print(abs_error, 4);
-      // Calculate relative error with threshold to avoid division by zero
-      float rel_error = (abs_error / max(abs(actual), 0.01f)) * 100.0;
-      Serial.print(", rel=");
-      Serial.print(rel_error, 2);
-      Serial.print("%");
-    };
 
     // Print results
     Serial.print("Angle: ");
     Serial.print(angle_labels[i]);
     Serial.print(" (");
-    Serial.print(angle, 6);
+    Serial.print(x_val, 4);
     Serial.println(" rad)");
 
-    Serial.print("  Sin - Pred: ");
-    Serial.print(sin_output, 4);
-    Serial.print(", Actual: ");
-    Serial.print(actual_sin, 4);
-    Serial.print(", Err: ");
-    printError(sin_output, actual_sin);
-    Serial.println();
+    Serial.print("  Sin: pred=");
+    Serial.print(sin_pred, 4);
+    Serial.print(" actual=");
+    Serial.print(sin_actual, 4);
+    Serial.print(" err=");
+    Serial.println(sin_err, 4);
 
-    Serial.print("  Cos - Pred: ");
-    Serial.print(cos_output, 4);
-    Serial.print(", Actual: ");
-    Serial.print(actual_cos, 4);
-    Serial.print(", Err: ");
-    printError(cos_output, actual_cos);
-    Serial.println();
+    Serial.print("  Cos: pred=");
+    Serial.print(cos_pred, 4);
+    Serial.print(" actual=");
+    Serial.print(cos_actual, 4);
+    Serial.print(" err=");
+    Serial.println(cos_err, 4);
 
-    Serial.print("  Tan - Pred: ");
-    Serial.print(tan_output, 4);
-    Serial.print(", Actual: ");
-    Serial.print(actual_tan, 4);
-    Serial.print(", Err: ");
-    printError(tan_output, actual_tan);
-    Serial.println();
+    if (tan_valid && fabs(tan_actual) < 10.0f) {
+      Serial.print("  Tan: pred=");
+      Serial.print(tan_pred, 4);
+      Serial.print(" actual=");
+      Serial.print(tan_actual, 4);
+      Serial.print(" err=");
+      Serial.println(tan_err, 4);
+    } else {
+      Serial.println("  Tan: skipped (near asymptote)");
+    }
 
     Serial.println();
-    delay(500);  // Delay between tests
+    delay(100);
   }
 
+  // Print accuracy summary
   Serial.println("========================================");
-  Serial.println("All tests complete! Restarting in 5s...");
+  Serial.println("ACCURACY SUMMARY");
+  Serial.println("========================================");
+  Serial.print("Tolerance threshold: ");
+  Serial.println(TOLERANCE, 2);
+  Serial.println();
+
+  Serial.print("SIN - Accuracy: ");
+  Serial.print((float)sin_correct / num_tests * 100.0f, 1);
+  Serial.print("% (");
+  Serial.print(sin_correct);
+  Serial.print("/");
+  Serial.print(num_tests);
+  Serial.print("), MAE: ");
+  Serial.println(sin_total_error / num_tests, 6);
+
+  Serial.print("COS - Accuracy: ");
+  Serial.print((float)cos_correct / num_tests * 100.0f, 1);
+  Serial.print("% (");
+  Serial.print(cos_correct);
+  Serial.print("/");
+  Serial.print(num_tests);
+  Serial.print("), MAE: ");
+  Serial.println(cos_total_error / num_tests, 6);
+
+  if (tan_count > 0) {
+    Serial.print("TAN - Accuracy: ");
+    Serial.print((float)tan_correct / tan_count * 100.0f, 1);
+    Serial.print("% (");
+    Serial.print(tan_correct);
+    Serial.print("/");
+    Serial.print(tan_count);
+    Serial.print("), MAE: ");
+    Serial.println(tan_total_error / tan_count, 6);
+  }
+
+  Serial.println("\n========================================");
+  Serial.println("Test complete! Restarting in 30s...");
   Serial.println("========================================\n");
-  delay(5000);
+  delay(30000);
 }
