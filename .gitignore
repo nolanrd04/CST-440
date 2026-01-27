@@ -1,6 +1,7 @@
 venv/
 */venv/
 .venv/
+Lab\ Questions/
 PersonalProjects/
 .DS_Store
 backend/req.txt
