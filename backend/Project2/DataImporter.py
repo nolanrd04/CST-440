@@ -3,7 +3,7 @@ DataImporter.py - Load and organize the Speech Commands dataset for wake word re
 
 Handles:
 - Loading all WAV file paths grouped by label
-- Mapping 5 target words (up, down, off, on, wow) to their labels
+- Mapping 6 target words (up, down, off, on, wow, sheila) to their labels
 - Grouping other word folders into "unknown", subsampled for class balance
 - Generating "silence" entries from _background_noise_/ WAVs
 - Using validation_list.txt and testing_list.txt for train/val/test splits
@@ -20,7 +20,7 @@ np.random.seed(SEED)
 SAMPLE_RATE = 16000
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data", "archive")
 
-TARGET_WORDS = ["up", "down", "off", "on", "wow"]
+TARGET_WORDS = ["up", "down", "off", "on", "wow", "sheila"]
 BACKGROUND_NOISE_DIR = "_background_noise_"
 
 
