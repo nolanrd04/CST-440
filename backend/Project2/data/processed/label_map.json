@@ -1,0 +1,9 @@
+{
+  "down": 0,
+  "off": 1,
+  "on": 2,
+  "silence": 3,
+  "unknown": 4,
+  "up": 5,
+  "wow": 6
+}

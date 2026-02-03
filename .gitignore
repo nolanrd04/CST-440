@@ -1,6 +1,7 @@
 venv/
 */venv/
 .venv/
+Lab\ Questions/
 PersonalProjects/
 .DS_Store
 backend/req.txt
@@ -10,3 +11,4 @@ backend/Project1/debug_arduino_values.py
 backend/Project1/simple_test/
 /backend/Project1/.ipynb_checkpoints/
 **.zip
+**/__pycache__/
