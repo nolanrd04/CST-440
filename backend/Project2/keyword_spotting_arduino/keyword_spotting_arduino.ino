@@ -10,8 +10,8 @@
  * when a keyword is detected. Returns to WAITING after 25 seconds.
  *
  * Audio: PDM microphone at 16kHz, 1-second buffer
- * Features: 13 MFCCs, 49 frames (30ms window, 20ms stride)
- * Model: GRU(48) -> 8-class softmax (float32 TFLite)
+ * Features: 13 MFCCs + 13 delta MFCCs = 26 features, 49 frames (30ms window, 20ms stride)
+ * Model: GRU(48) -> GRU(48) -> 8-class softmax (float32 TFLite)
  */
 
 #include <PDM.h>
@@ -39,11 +39,13 @@ static volatile bool g_audio_ready = false;
 // ============================================================
 static const int kNumFrames = 49;
 static const int kNumMfcc = 13;
+static const int kNumFeatures = 26;     // 13 MFCCs + 13 delta MFCCs
 static const int kFftSize = 512;        // Next power of 2 >= 480
 static const int kWindowSize = 480;     // 30ms at 16kHz
 static const int kHopLength = 320;      // 20ms stride at 16kHz
 static const int kNumMelBins = 40;
 static const float kSampleRateF = 16000.0f;
+static const int kDeltaHalfWidth = 4;   // librosa default: width=9, half=4
 
 // Mel filterbank (precomputed for 40 bins, 0-8000 Hz, 512-point FFT)
 static float g_mel_filterbank[kNumMelBins][kFftSize / 2 + 1];
@@ -54,8 +56,11 @@ static float g_hann_window[kWindowSize];
 // DCT-II matrix for MFCC extraction
 static float g_dct_matrix[kNumMfcc][kNumMelBins];
 
-// MFCC output buffer
-static float g_mfcc_features[kNumFrames][kNumMfcc];
+// MFCC output buffer (13 MFCCs only, before delta computation)
+static float g_mfcc_raw[kNumFrames][kNumMfcc];
+
+// Full feature buffer: 13 MFCCs + 13 delta MFCCs = 26 features per frame
+static float g_mfcc_features[kNumFrames][kNumFeatures];
 
 // FFT instance
 static arm_rfft_fast_instance_f32 g_fft_instance;
@@ -222,13 +227,42 @@ static void extract_mfcc(const int16_t* audio, int audio_len) {
       for (int j = 0; j < kNumMelBins; j++) {
         sum += g_dct_matrix[i][j] * mel_energies[j];
       }
-      g_mfcc_features[frame][i] = sum;
+      g_mfcc_raw[frame][i] = sum;
     }
   }
 
-  // Normalize using training statistics
+  // Compute delta MFCCs using Savitzky-Golay first-derivative filter (width=9)
+  // delta[t] = sum(n * mfcc[t+n] for n in -4..4) / sum(n^2 for n in -4..4)
+  // Denominator for half_width=4: 2*(1+4+9+16) = 60
+  float denom = 0.0f;
+  for (int n = 1; n <= kDeltaHalfWidth; n++) {
+    denom += (float)(n * n);
+  }
+  denom *= 2.0f;  // = 60
+
   for (int frame = 0; frame < kNumFrames; frame++) {
+    // Copy raw MFCCs into first 13 features
     for (int i = 0; i < kNumMfcc; i++) {
+      g_mfcc_features[frame][i] = g_mfcc_raw[frame][i];
+    }
+
+    // Compute delta for each MFCC coefficient
+    for (int i = 0; i < kNumMfcc; i++) {
+      float delta = 0.0f;
+      for (int n = -kDeltaHalfWidth; n <= kDeltaHalfWidth; n++) {
+        // Edge padding: clamp index to valid range (matches librosa 'edge' mode)
+        int idx = frame + n;
+        if (idx < 0) idx = 0;
+        if (idx >= kNumFrames) idx = kNumFrames - 1;
+        delta += (float)n * g_mfcc_raw[idx][i];
+      }
+      g_mfcc_features[frame][kNumMfcc + i] = delta / denom;
+    }
+  }
+
+  // Normalize all 26 features using training statistics
+  for (int frame = 0; frame < kNumFrames; frame++) {
+    for (int i = 0; i < kNumFeatures; i++) {
       g_mfcc_features[frame][i] =
           (g_mfcc_features[frame][i] - kMfccMean[i]) / kMfccStd[i];
     }
@@ -325,10 +359,10 @@ void setup() {
 // Run inference and return predicted class index + confidence
 // ============================================================
 static int run_inference(float* confidence) {
-  // Copy MFCC features into input tensor
+  // Copy MFCC + delta features into input tensor
   for (int frame = 0; frame < kNumFrames; frame++) {
-    for (int coeff = 0; coeff < kNumMfcc; coeff++) {
-      input_tensor->data.f[frame * kNumMfcc + coeff] = g_mfcc_features[frame][coeff];
+    for (int coeff = 0; coeff < kNumFeatures; coeff++) {
+      input_tensor->data.f[frame * kNumFeatures + coeff] = g_mfcc_features[frame][coeff];
     }
   }
 
