@@ -32,7 +32,7 @@ TARGET_LENGTH = SAMPLE_RATE  # 16000 samples = 1 second
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "data", "processed")
 
 # Label mapping
-LABELS = ["down", "off", "on", "silence", "unknown", "up", "wow"]
+LABELS = ["down", "off", "on", "sheila", "silence", "unknown", "up", "wow"]
 LABEL_TO_INDEX = {label: i for i, label in enumerate(LABELS)}
 
 
