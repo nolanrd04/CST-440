@@ -107,11 +107,12 @@ def import_data():
             else:
                 unknown_files[split].append(entry)
 
-    # Subsample unknown files to match the average per-class count in each split
+    # Subsample unknown files to 2x the average per-class count in each split,
+    # giving the model more diverse examples of what "unknown" sounds like
     for split in ["train", "val", "test"]:
         avg_target_per_class = len(target_files[split]) // len(TARGET_WORDS)
         random.shuffle(unknown_files[split])
-        unknown_files[split] = unknown_files[split][:avg_target_per_class]
+        unknown_files[split] = unknown_files[split][:avg_target_per_class * 2]
 
     avg_target_per_class = len(target_files["train"]) // len(TARGET_WORDS)
 

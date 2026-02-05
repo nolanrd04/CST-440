@@ -2,8 +2,8 @@
 train_gru_model.py - Train a GRU model for keyword spotting and export to TFLite.
 
 Handles:
-- Loading preprocessed MFCC data (49 frames x 13 coefficients)
-- Building and training a GRU(48) classifier for 8 keyword classes
+- Loading preprocessed MFCC data (49 frames x 26 features)
+- Building and training a stacked GRU(64,64) classifier for 8 keyword classes
 - Evaluating per-class precision/recall/F1 and confusion matrix
 - Converting to float32 TFLite model
 - Generating a C header for Arduino deployment
@@ -51,21 +51,28 @@ def load_data():
 
 
 def build_model(input_shape, num_classes):
-    """Build a GRU-based keyword spotting model.
+    """Build a stacked GRU-based keyword spotting model.
 
-    Architecture: GRU(48) -> Dropout(0.3) -> Dense(num_classes, softmax)
-    ~9,400 parameters, ~37 KB as float32 TFLite.
+    Architecture: GRU(48) -> GRU(48) -> Dropout(0.3) -> Dense(num_classes, softmax)
     """
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=input_shape),
+        tf.keras.layers.GRU(48, return_sequences=True),
         tf.keras.layers.GRU(48, return_sequences=False),
         tf.keras.layers.Dropout(0.3),
         tf.keras.layers.Dense(num_classes, activation='softmax'),
     ])
 
+    def sparse_crossentropy_with_label_smoothing(y_true, y_pred):
+        """Sparse categorical crossentropy with label smoothing."""
+        smoothing = 0.1
+        y_true_onehot = tf.one_hot(tf.cast(y_true, tf.int32), num_classes)
+        y_true_smooth = y_true_onehot * (1.0 - smoothing) + smoothing / num_classes
+        return tf.keras.losses.categorical_crossentropy(y_true_smooth, y_pred)
+
     model.compile(
         optimizer='adam',
-        loss='sparse_categorical_crossentropy',
+        loss=sparse_crossentropy_with_label_smoothing,
         metrics=['accuracy'],
     )
 
@@ -78,14 +85,14 @@ def train_model(model, X_train, y_train, X_val, y_val):
     callbacks = [
         tf.keras.callbacks.EarlyStopping(
             monitor='val_loss',
-            patience=10,
+            patience=15,
             restore_best_weights=True,
             verbose=1,
         ),
         tf.keras.callbacks.ReduceLROnPlateau(
             monitor='val_loss',
             factor=0.5,
-            patience=5,
+            patience=8,
             min_lr=1e-6,
             verbose=1,
         ),
@@ -95,7 +102,7 @@ def train_model(model, X_train, y_train, X_val, y_val):
         X_train, y_train,
         validation_data=(X_val, y_val),
         epochs=100,
-        batch_size=64,
+        batch_size=128,
         callbacks=callbacks,
         verbose=1,
     )
@@ -134,7 +141,13 @@ def evaluate_model(model, X_test, y_test, index_to_label):
 
 def convert_to_tflite(model):
     """Convert Keras model to float32 TFLite format."""
-    converter = tf.lite.TFLiteConverter.from_keras_model(model)
+    # Use a concrete function with fixed input shape so TFLite can
+    # resolve GRU's TensorList ops (which require static shapes).
+    run_model = tf.function(lambda x: model(x))
+    concrete_func = run_model.get_concrete_function(
+        tf.TensorSpec([1, 49, 26], tf.float32)
+    )
+    converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_func])
     tflite_model = converter.convert()
 
     tflite_path = os.path.join(os.path.dirname(__file__), "kws_model.tflite")
@@ -223,7 +236,7 @@ def main():
     X_train, y_train, X_val, y_val, X_test, y_test, label_map, index_to_label = load_data()
 
     # Build model
-    input_shape = (X_train.shape[1], X_train.shape[2])  # (49, 13)
+    input_shape = (X_train.shape[1], X_train.shape[2])  # (49, 26)
     model = build_model(input_shape, len(label_map))
 
     # Train
