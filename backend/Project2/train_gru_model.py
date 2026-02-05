@@ -9,7 +9,7 @@ Handles:
 - Generating a C header for Arduino deployment
 """
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Force CPU
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Force CPU (RTX 5070 Ti not supported yet)
 
 import json
 import numpy as np
@@ -218,6 +218,13 @@ def main():
     print("=" * 60)
     print("Keyword Spotting - GRU Model Training")
     print("=" * 60)
+
+    # Check GPU availability
+    gpu_devices = tf.config.list_physical_devices('GPU')
+    if gpu_devices:
+        print(f"Training on GPU: {len(gpu_devices)} GPU(s) detected")
+    else:
+        print("Training on CPU (GPU not available or disabled)")
 
     # Load data
     X_train, y_train, X_val, y_val, X_test, y_test, label_map, index_to_label = load_data()
