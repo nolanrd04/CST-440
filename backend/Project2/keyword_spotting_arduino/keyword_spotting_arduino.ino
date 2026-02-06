@@ -15,7 +15,7 @@
  */
 
 #include <PDM.h>
-#include <Adafruit_TensorFlowLite.h>
+#include <Chirale_TensorFlowLite.h>
 #include <tensorflow/lite/micro/all_ops_resolver.h>
 #include <tensorflow/lite/micro/micro_interpreter.h>
 #include <tensorflow/lite/micro/micro_log.h>
