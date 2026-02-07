@@ -1,7 +1,3 @@
-#include <arm_math.h>
-
-#include <Chirale_TensorFlowLite.h>
-
 /*
  * Keyword Spotting with Wake Word on Arduino Nano 33 BLE
  * CST-440 - Machine Learning on Microcontrollers
@@ -15,14 +11,13 @@
  *
  * Audio: PDM microphone at 16kHz, 1-second buffer
  * Features: 13 MFCCs + 13 delta MFCCs = 26 features, 49 frames (30ms window, 20ms stride)
- * Model: GRU(48) -> GRU(48) -> 8-class softmax (float32 TFLite)
+ * Model: 1D CNN -> GlobalAvgPool -> 8-class softmax (float32 TFLite)
  */
 
 #include <PDM.h>
-#include <Chirale_TensorFlowLite.h>
+#include <ArduTFLite.h>
 #include <tensorflow/lite/micro/all_ops_resolver.h>
 #include <tensorflow/lite/micro/micro_interpreter.h>
-#include <tensorflow/lite/micro/micro_log.h>
 #include <tensorflow/lite/micro/system_setup.h>
 #include <tensorflow/lite/schema/schema_generated.h>
 #include <arm_math.h>
@@ -78,7 +73,7 @@ namespace {
   TfLiteTensor* input_tensor = nullptr;
   TfLiteTensor* output_tensor = nullptr;
 
-  constexpr int kTensorArenaSize = 100 * 1024;  // 100 KB (increased for GRU model)
+  constexpr int kTensorArenaSize = 50 * 1024;  // 50 KB (CNN model)
   alignas(16) uint8_t tensor_arena[kTensorArenaSize];
 }
 
