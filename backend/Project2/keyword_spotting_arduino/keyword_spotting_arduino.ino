@@ -1,3 +1,5 @@
+#include <Chirale_TensorFlowLite.h>
+
 /*
  * Keyword Spotting with Wake Word on Arduino Nano 33 BLE
  * CST-440 - Machine Learning on Microcontrollers
