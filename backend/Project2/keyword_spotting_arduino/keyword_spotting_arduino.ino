@@ -1,3 +1,5 @@
+#include <arm_math.h>
+
 #include <Chirale_TensorFlowLite.h>
 
 /*
@@ -76,7 +78,7 @@ namespace {
   TfLiteTensor* input_tensor = nullptr;
   TfLiteTensor* output_tensor = nullptr;
 
-  constexpr int kTensorArenaSize = 60 * 1024;  // 60 KB
+  constexpr int kTensorArenaSize = 100 * 1024;  // 100 KB (increased for GRU model)
   alignas(16) uint8_t tensor_arena[kTensorArenaSize];
 }
 

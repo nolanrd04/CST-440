@@ -51,14 +51,15 @@ def load_data():
 
 
 def build_model(input_shape, num_classes):
-    """Build a stacked GRU-based keyword spotting model.
+    """Build a stacked LSTM-based keyword spotting model.
 
-    Architecture: GRU(48) -> GRU(48) -> Dropout(0.3) -> Dense(num_classes, softmax)
+    Architecture: LSTM(48) -> LSTM(48) -> Dropout(0.3) -> Dense(num_classes, softmax)
+    Note: Using LSTM with unroll=True for better TFLite Micro compatibility
     """
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=input_shape),
-        tf.keras.layers.GRU(48, return_sequences=True),
-        tf.keras.layers.GRU(48, return_sequences=False),
+        tf.keras.layers.LSTM(48, return_sequences=True, unroll=True),
+        tf.keras.layers.LSTM(48, return_sequences=False, unroll=True),
         tf.keras.layers.Dropout(0.3),
         tf.keras.layers.Dense(num_classes, activation='softmax'),
     ])
@@ -142,21 +143,21 @@ def evaluate_model(model, X_test, y_test, index_to_label):
 def convert_to_tflite(model):
     """Convert Keras model to float32 TFLite format.
     
-    Uses concrete functions to ensure GRU operations are properly unrolled
-    and converted to TFLite Micro-compatible operations.
+    Uses concrete functions with unrolled LSTM to ensure operations are
+    properly converted to TFLite Micro-compatible operations without WHILE loops.
     """
-    # Use a concrete function with fixed input shape so TFLite can
-    # resolve GRU's TensorList ops (which require static shapes).
+    # Use a concrete function with fixed input shape
     run_model = tf.function(lambda x: model(x))
     concrete_func = run_model.get_concrete_function(
         tf.TensorSpec([1, 49, 26], tf.float32)
     )
     converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_func])
     
-    # Enable only TFLITE_BUILTINS (no SELECT_TF_OPS/Flex) for microcontroller compatibility
+    # Enable only TFLITE_BUILTINS for microcontroller compatibility
     converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
     
-    # Enable lower tensor list ops to convert dynamic tensors to static arrays
+    # Enable experimental options for better compatibility
+    converter.experimental_new_converter = True
     converter._experimental_lower_tensor_list_ops = True
     
     tflite_model = converter.convert()

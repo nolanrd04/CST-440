@@ -55,68 +55,125 @@ Use the `Report.ipynb` notebook to evaluate the model's performance. Open the no
 
 #### Option 1: Using Arduino IDE
 
-. Open Arduino IDE
+**Step 1: Install Board Support**
+1. Open Arduino IDE
 2. Go to **Tools > Board > Boards Manager**
 3. Search for "Arduino Mbed OS Nano Boards"
 4. Install "Arduino Mbed OS Nano Boards" by Arduino
 
-### 3. Install Required Libraries
-1. **PDM** (by Arduino):
-   - Go to **Tools > Manage Libraries**.
-   - Search for "PDM" and install it.
+**Step 2: Install Required Libraries**
+1. Go to **Tools > Manage Libraries**
+2. Search and install these libraries:
+   - **PDM** (by Arduino) - for microphone input
+   - **CMSIS-DSP** (or "CMSIS") - for signal processing
 
-2. **Chirale_TensorFlowLite**:
-   - If not found in the Library Manager, manually install:
-     1. Download from: https://github.com/ChiraleBrandon/Chirale_TensorFlowLite
-     2. Go to **Sketch > Include Library > Add .ZIP Library**.
-     3. Select the downloaded ZIP file.
+3. **Chirale_TensorFlowLite** - Install manually:
+   - Download: https://github.com/ChiraleBrandon/Chirale_TensorFlowLite
+   - Go to **Sketch > Include Library > Add .ZIP Library**
+   - Select the downloaded ZIP file
 
-3. **TensorFlow Lite Micro Libraries**:
-   - These are required for TensorFlow Lite inference.
-   - Follow the TensorFlow Lite Micro setup guide to include the necessary files in your Arduino project.
+**Step 3: Connect and Configure Board**
+1. Connect Arduino Nano 33 BLE via USB
+2. Select board: **Tools > Board > Arduino Nano 33 BLE**
+3. Select port: **Tools > Port** 
+   - Mac: `/dev/cu.usbmodem14201` or similar
+   - Windows: `COM3` or similar
+   - Linux: `/dev/ttyACM0` or similar
 
-4. **CMSIS-DSP**:
-   - Go to **Tools > Manage Libraries**.
-   - Search for "CMSIS-DSP" or "CMSIS" and install it.
-   - Ensure the `arm_math.h` file is available in the library folder.
+**Step 4: Upload Code**
+1. Open `keyword_spotting_arduino/keyword_spotting_arduino.ino`
+2. Click **Upload** button (→)
+   - First upload takes 2-5 minutes due to library size
+   - Subsequent uploads are faster
+3. Wait for "Done uploading" message
 
-### 4. Configure Board Settings
-1. Connect your Arduino Nano 33 BLE to your computer via USB
-2. Go to **Tools > Board** and select **Arduino Nano 33 BLE**
-3. Go to **Tools > Port** and select the port showing your Arduino
-   - On Mac: looks like `/dev/cu.usbmodem14201` or similar
-   - On Windows: looks like `COM3` or similar
-   - On Linux: looks like `/dev/ttyACM0` or similar
+**Step 5: Test the System**
+1. Open **Tools > Serial Monitor** (set to 115200 baud)
+2. You should see initialization messages
+3. **Say the wake word**: "Sheila"
+   - System enters listening mode for 25 seconds
+   - Serial monitor shows: `[WAKE] 'sheila' detected! Listening for commands...`
+4. **Say a keyword**: "down", "off", "on", "up", or "wow"
+   - System outputs `1` for 1 second when keyword detected
+   - Serial monitor shows: `[KEYWORD] Detected: [word] (confidence: X.XX)`
+5. System returns to waiting mode after 25 seconds of no commands
 
-### 5. Open the Project
-1. Open `keyword_spotting_arduino.ino` in Arduino IDE
-2. The IDE should automatically open `kws_model_data.h` as a tab
-
-### 6. Compile and Upload
-1. Click the **Verify** button (✓) to compile the code
-   - First compilation will take 2-5 minutes due to TensorFlow Lite library size
-   - Subsequent compilations will be faster
-2. Click the **Upload** button (→) to upload to the board
-3. Open **Tools > Serial Monitor** to see debug output (set to 115200 baud)
+**Expected Serial Output:**
+```
+========================================
+Keyword Spotting with Wake Word
+CST-440 Project 2
+========================================
+Signal processing initialized.
+Model loaded. Input shape: 1x49x26, Output shape: 1x8
+Microphone started.
+0
+0
+[WAKE] 'sheila' detected! Listening for commands...
+0
+[KEYWORD] Detected: on (confidence: 0.85)
+1
+0
+[TIMEOUT] Returning to WAITING state.
+0
+```
 
 #### Option 2: Using PlatformIO in VS Code
 
-1. Install the [PlatformIO extension for VS Code](https://marketplace.visualstudio.com/items?itemName=platformio.platformio-ide).
-2. Open the `keyword_spotting_arduino/` folder in VS Code.
-3. Configure the Arduino board and port in PlatformIO:
-   - Open the `platformio.ini` file and set the `board` to your Arduino board model.
-   - Connect your Arduino device to your computer. In the PlatformIO interface, click on the "Devices" icon in the left-hand toolbar to view connected devices. Identify your Arduino's port and ensure it matches the `upload_port` value in the `platformio.ini` file. 
-   *should be under the form of /dev/cu.usbmodemXXXX     Nano 33 BLE*
-4. Build and upload the project:
-   - Click the "Build" button (a checkmark icon) in the PlatformIO toolbar at the bottom of the VS Code window. If you don't see the toolbar, ensure the PlatformIO extension is installed and active. The toolbar typically appears when you open a project with a `platformio.ini` file. The Build button compiles the sketch and checks for any errors in the code.
-   - Click the "Upload" button (a right-facing arrow icon) in the PlatformIO toolbar to flash the compiled sketch to the Arduino. Ensure your Arduino is connected to your computer during this step.
+1. Install the [PlatformIO extension for VS Code](https://marketplace.visualstudio.com/items?itemName=platformio.platformio-ide)
+2. Open the `keyword_spotting_arduino/` folder in VS Code
+3. Connect Arduino Nano 33 BLE via USB
+4. Open `platformio.ini` and verify settings:
+   - `board = nano33ble`
+   - `upload_port = /dev/cu.usbmodemXXXX` (update with your port)
+5. Click **Upload** button (→) in PlatformIO toolbar
+6. Open **Serial Monitor** to view output
 
-### 6. Test Voice Commands
+---
 
-After deploying the model to the Arduino, test the voice commands by speaking the keywords near the microphone connected to the Arduino. The system should recognize the keywords and perform the corresponding actions.
+## Testing Voice Commands
+
+**System Behavior:**
+- **Waiting Mode**: Listens only for "Sheila" (wake word) → Outputs `0`
+- **Listening Mode**: Active for 25 seconds after wake word detected
+  - Recognizes: "down", "off", "on", "up", "wow"
+  - Outputs `1` for 1 second when keyword detected
+  - Returns to waiting mode after timeout
+
+**Tips:**
+- Speak clearly at normal volume
+- Hold microphone 10-20cm from your mouth
+- Minimize background noise for better accuracy
+- System shows confidence scores in serial monitor
+
+---
+
+## Troubleshooting
+
+**Error: "No device found on cu.usbmodemXXXX"**
+- Reconnect USB cable
+- Try different USB port
+- Double-tap RESET button on Arduino (enters bootloader mode)
+- Check port in Tools > Port
+
+**Error: "Type INT32 not supported" or "Invoke() failed"**
+- Model needs to be regenerated with fixed training script
+- Run: `python train_gru_model.py`
+- This generates new `kws_model.tflite` and `kws_model_data.h`
+- Re-upload Arduino code
+
+**Low accuracy / Not detecting keywords:**
+- Increase volume when speaking
+- Reduce background noise
+- Check Serial Monitor for confidence scores (should be > 0.6)
+- Ensure microphone is facing you
+
+---
 
 ## Notes
 
-- Ensure your Arduino board has sufficient memory to handle the model.
-- Use the `data/_background_noise_/` folder to add background noise for better model robustness.
-- Refer to the `data/archive/README.md` for details about the raw dataset.
+- Arduino Nano 33 BLE has 1MB flash and 256KB RAM
+- Model uses ~130KB flash, ~100KB RAM
+- Background noise samples in `data/_background_noise_/` improve robustness
+- See `data/archive/README.md` for dataset details
+- Confidence threshold set to 0.6 (adjustable in Arduino code)
