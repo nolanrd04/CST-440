@@ -1,3 +1,4 @@
+
 /*
  * Keyword Spotting with Wake Word on Arduino Nano 33 BLE
  * CST-440 - Machine Learning on Microcontrollers
@@ -15,7 +16,7 @@
  */
 
 #include <PDM.h>
-#include <ArduTFLite.h>
+#include <Chirale_TensorFlowLite.h>
 #include <tensorflow/lite/micro/all_ops_resolver.h>
 #include <tensorflow/lite/micro/micro_interpreter.h>
 #include <tensorflow/lite/micro/system_setup.h>

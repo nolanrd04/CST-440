@@ -63,14 +63,11 @@ Use the `Report.ipynb` notebook to evaluate the model's performance. Open the no
 
 **Step 2: Install Required Libraries**
 1. Go to **Tools > Manage Libraries**
-2. Search and install these libraries:
+2. Search and install these libraries (if you device don't have it yet):
    - **PDM** (by Arduino) - for microphone input
    - **CMSIS-DSP** (or "CMSIS") - for signal processing
+   - **Chiracle_TensorFlowLite**
 
-3. **Chirale_TensorFlowLite** - Install manually:
-   - Download: https://github.com/ChiraleBrandon/Chirale_TensorFlowLite
-   - Go to **Sketch > Include Library > Add .ZIP Library**
-   - Select the downloaded ZIP file
 
 **Step 3: Connect and Configure Board**
 1. Connect Arduino Nano 33 BLE via USB
@@ -145,6 +142,11 @@ Microphone started.
 - Hold microphone 10-20cm from your mouth
 - Minimize background noise for better accuracy
 - System shows confidence scores in serial monitor
+
+**To Stop Testing:**
+1. Close the Serial Monitor
+2. Unplug the USB cable from Arduino, or
+3. Press the RESET button on Arduino to restart the program
 
 ---
 
