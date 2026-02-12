@@ -105,6 +105,9 @@ static const int kIdxWow     = 7;
 static unsigned long g_keyword_detected_ms = 0;
 static const unsigned long kKeywordOutputMs = 1000;  // Output 1 for 1 second
 
+// Tally unknown detections during listening period
+static int g_unknown_count = 0;
+
 // ============================================================
 // Helper: Hz to Mel and Mel to Hz
 // ============================================================
@@ -421,6 +424,7 @@ void loop() {
         g_state = STATE_LISTENING;
         g_listen_start_ms = now;
         g_keyword_detected_ms = 0;
+        g_unknown_count = 0;
         Serial.println("[WAKE] 'sheila' detected! Listening for commands...");
       }
       // Output 0 in waiting mode
@@ -428,10 +432,18 @@ void loop() {
       break;
 
     case STATE_LISTENING:
+      // Count unknown detections
+      if (predicted_class == kIdxUnknown) {
+        g_unknown_count++;
+      }
+
       // Check timeout
       if (now - g_listen_start_ms >= kListenTimeoutMs) {
+        Serial.print("[TIMEOUT] Unknown detections during listening period: ");
+        Serial.println(g_unknown_count);
         g_state = STATE_WAITING;
         g_keyword_detected_ms = 0;
+        g_unknown_count = 0;
         Serial.println("[TIMEOUT] Returning to WAITING state.");
         Serial.println("0");
         break;
