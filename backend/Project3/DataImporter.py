@@ -23,11 +23,23 @@ RAW_DIR = os.path.join(DATA_DIR, "raw")
 IMG_SIZE = 48
 
 
+def resize_images(images, target_size):
+    """Resize a batch of 2D images to target_size x target_size using nearest-neighbor."""
+    n = len(images)
+    resized = np.zeros((n, target_size, target_size), dtype=images.dtype)
+    for i in range(n):
+        h, w = images[i].shape[:2]
+        row_idx = np.clip(np.floor(np.arange(target_size) * h / target_size).astype(int), 0, h - 1)
+        col_idx = np.clip(np.floor(np.arange(target_size) * w / target_size).astype(int), 0, w - 1)
+        resized[i] = images[i][np.ix_(row_idx, col_idx)]
+    return resized
+
+
 def download_face_data(min_faces_per_person=10):
     """Download LFW face dataset via sklearn.
 
     Returns:
-        numpy array of face images, shape (N, 62, 47) uint8-range floats
+        numpy array of face images, shape (N, IMG_SIZE, IMG_SIZE) float64 in [0, 255]
     """
     print("Downloading LFW face dataset...")
     lfw = fetch_lfw_people(
@@ -36,7 +48,9 @@ def download_face_data(min_faces_per_person=10):
         color=False,
     )
     images = lfw.images  # shape (N, 62, 47), float64 in [0, 255]
-    print(f"  Loaded {len(images)} face images, shape {images[0].shape}")
+    print(f"  Loaded {len(images)} face images, raw shape {images[0].shape}")
+    images = resize_images(images, IMG_SIZE)
+    print(f"  Resized to {images[0].shape}")
     return images
 
 
@@ -47,7 +61,7 @@ def download_nonface_data(num_samples=3000):
     All CIFAR-10 classes are non-face, so we use all of them.
 
     Returns:
-        numpy array of non-face images, shape (N, 32, 32) grayscale
+        numpy array of non-face images, shape (N, IMG_SIZE, IMG_SIZE) grayscale
     """
     import tensorflow as tf
 
@@ -68,7 +82,9 @@ def download_nonface_data(num_samples=3000):
     indices = np.random.permutation(len(gray))[:num_samples]
     gray = gray[indices]
 
-    print(f"  Loaded {len(gray)} non-face images, shape {gray[0].shape}")
+    print(f"  Loaded {len(gray)} non-face images, raw shape {gray[0].shape}")
+    gray = resize_images(gray, IMG_SIZE)
+    print(f"  Resized to {gray[0].shape}")
     return gray
 
 
