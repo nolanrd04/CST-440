@@ -1,0 +1,9 @@
+board_manager:
+  additional_urls:
+    - https://dl.espressif.com/dl/package_esp32_index.json
+    - https://adafruit.github.io/arduino-board-index/package_adafruit_index.json
+
+directories:
+  data: ~/.arduino15
+  downloads: ~/.arduino15/staging
+  user: ~/Arduino

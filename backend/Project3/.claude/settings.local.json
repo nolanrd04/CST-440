@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/home/sorenhaynes/.local/bin/pio run -e arduino -t upload --upload-port /dev/ttyACM0)"
+    ]
+  }
+}

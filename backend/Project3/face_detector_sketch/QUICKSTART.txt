@@ -1,0 +1,70 @@
+========================================
+Face Detector - Arduino Nano 33 BLE
+QUICKSTART
+========================================
+
+REQUIREMENTS:
+- Arduino Nano 33 BLE connected via USB
+- Arducam Mini OV2640 connected (see wiring below)
+- Arduino CLI installed
+
+WIRING:
+Connect camera to Arduino Nano 33:
+
+Camera Pin → Arduino Pin
+MOSI       → D11
+MISO       → D12
+SCK        → D13
+CS         → D10
+SDA        → A4
+SCL        → A5
+GND        → GND
+VCC        → 3.3V
+
+BUILD & UPLOAD:
+1. Connect Arduino via USB
+2. Run:
+   ./build_and_upload.sh
+
+3. Select your COM port when prompted
+   (e.g., /dev/ttyACM0 or COM3)
+
+4. Wait for upload to complete
+
+TESTING:
+1. Open serial monitor at 115200 baud:
+   screen /dev/ttyACM0 115200
+
+2. Type 'c' and press Enter
+3. Wait for:
+   - Frame capture
+   - Image processing
+   - Inference
+   - Results
+
+Expected output:
+   Non-face score: 0.1234
+   Face score:     0.8766
+   ✓ FACE DETECTED
+
+NOTES:
+- Model is currently using placeholder inference
+- Real TensorFlow Lite integration coming next
+- Camera initialization verified
+- Data processing (resize, normalize) implemented
+- Serial communication working
+
+TROUBLESHOOTING:
+Camera not detected?
+  - Check USB connection
+  - Verify wiring on breadboard
+  - Try: arduino-cli board list
+
+Upload failed?
+  - Check port is correct
+  - Try different USB cable
+  - Reset Arduino (press button)
+
+Serial monitor not connecting?
+  - Install 'screen': sudo apt install screen
+  - Or use Arduino IDE's Serial Monitor instead

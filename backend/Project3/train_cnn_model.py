@@ -52,24 +52,26 @@ def load_data():
 
 
 def build_model(input_shape):
-    """Build a tiny 2D CNN for face detection.
+    """Build a tiny 2D CNN for face detection (50% smaller model).
 
     Architecture designed for Arduino deployment:
-        Conv2D(16) -> MaxPool -> Conv2D(32) -> MaxPool -> Conv2D(64) -> GAP -> Dense(2)
+        Conv2D(8) -> MaxPool -> Conv2D(16) -> MaxPool -> Conv2D(32) -> GAP -> Dense(2)
+
+    This is 50% smaller than the original, reducing model size and memory usage.
     """
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=input_shape),
 
-        # 48x48x1 -> 24x24x16
+        # 48x48x1 -> 24x24x8
+        tf.keras.layers.Conv2D(8, (3, 3), padding='same', activation='relu'),
+        tf.keras.layers.MaxPooling2D((2, 2)),
+
+        # 24x24x8 -> 12x12x16
         tf.keras.layers.Conv2D(16, (3, 3), padding='same', activation='relu'),
         tf.keras.layers.MaxPooling2D((2, 2)),
 
-        # 24x24x16 -> 12x12x32
+        # 12x12x16 -> 6x6x32
         tf.keras.layers.Conv2D(32, (3, 3), padding='same', activation='relu'),
-        tf.keras.layers.MaxPooling2D((2, 2)),
-
-        # 12x12x32 -> 6x6x64
-        tf.keras.layers.Conv2D(64, (3, 3), padding='same', activation='relu'),
         tf.keras.layers.MaxPooling2D((2, 2)),
 
         tf.keras.layers.GlobalAveragePooling2D(),
