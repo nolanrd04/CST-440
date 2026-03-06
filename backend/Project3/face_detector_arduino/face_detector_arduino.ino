@@ -17,7 +17,7 @@
 #include "face_model_data.h"
 
 // Version
-const char* FIRMWARE_VERSION = "v2.6";
+const char* FIRMWARE_VERSION = "v2.7";
 
 // Camera configuration
 #define CS_PIN 10
@@ -57,13 +57,13 @@ void captureAndFillTensor() {
     Serial.println(fifo_len);
   }
 
-  // Calculate bytes per row based on actual FIFO size (160x120 image)
-  uint32_t bytes_per_row = fifo_len / 120;
+  // Calculate bytes per row based on actual FIFO size (320x240 image)
+  uint32_t bytes_per_row = fifo_len / 240;
   Serial.print("Bytes per row: "); Serial.println(bytes_per_row);
 
   cam.set_fifo_burst();
 
-  for (int src_row = 0; src_row < 120; src_row++) {
+  for (int src_row = 0; src_row < 240; src_row++) {
     for (uint32_t i = 0; i < bytes_per_row; i++) row_buf[i] = cam.read_fifo();
 
     if (src_row == 0) {
