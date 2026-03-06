@@ -35,13 +35,24 @@ uint8_t debug_image[48 * 48];
 void captureAndFillTensor() {
   uint8_t row_buf[640]; // one row of 320 RGB565 pixels
 
-  cam.flush_fifo();
-  cam.clear_fifo_flag();
+  // Enhanced FIFO clearing - flush multiple times to ensure clean state
+  for (int i = 0; i < 3; i++) {
+    cam.flush_fifo();
+    cam.clear_fifo_flag();
+    delay(10);
+  }
+  
   cam.start_capture();
   while (!cam.get_bit(ARDUCHIP_TRIG, CAP_DONE_MASK)) { delay(1); }
 
   uint32_t fifo_len = cam.read_fifo_length();
   Serial.print("FIFO length: "); Serial.println(fifo_len);
+  
+  // Warn if FIFO size is abnormal (expected ~153600 for 320x240 RGB565)
+  if (fifo_len < 150000 || fifo_len > 160000) {
+    Serial.print("WARNING: Abnormal FIFO size! Expected ~153600, got ");
+    Serial.println(fifo_len);
+  }
 
   cam.CS_LOW();
   SPI.transfer(BURST_FIFO_READ);
@@ -111,7 +122,7 @@ void setup() {
 
   cam.set_format(BMP);
   cam.InitCAM();
-  cam.set_bit(ARDUCHIP_TIM, VSYNC_LEVEL_MASK);
+  cam.set_bit(ARDUCHIP_TIM, VSYNC_MASK);
   cam.clear_fifo_flag();
 
   // Override to RGB565 raw output (bypass JPEG compression)
