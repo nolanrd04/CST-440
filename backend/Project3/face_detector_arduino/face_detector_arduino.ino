@@ -131,13 +131,21 @@ void setup() {
   Serial.print("OV2640 chip ID: 0x"); Serial.println((vid << 8) | pid, HEX);
 
   cam.set_format(BMP);
-  cam.InitCAM();
-  cam.OV2640_set_JPEG_size(OV2640_160x120);
-  delay(1000);  // allow AEC/AGC to settle
-  cam.clear_fifo_flag();
-  
+cam.InitCAM();
 
-  Serial.println("Camera ready (320x240 RGB565)");
+cam.clear_fifo_flag();
+
+// Select DSP register bank
+cam.wrSensorReg8_8(0xFF, 0x00);
+
+// Disable JPEG compression engine
+cam.wrSensorReg8_8(0xE0, 0x04);   // reset JPEG
+cam.wrSensorReg8_8(0xE0, 0x00);   // disable JPEG
+
+// Set RGB565 output
+cam.wrSensorReg8_8(0xDA, 0x08);
+
+Serial.println("Camera ready (320x240 RGB565)");
 
   // --- TFLite init ---
   tflite::InitializeTarget();
