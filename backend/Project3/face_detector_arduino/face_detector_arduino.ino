@@ -16,6 +16,9 @@
 
 #include "face_model_data.h"
 
+// Version
+const char* FIRMWARE_VERSION = "v2.6";
+
 // Camera configuration
 #define CS_PIN 10
 ArduCAM cam(OV2640, CS_PIN);
@@ -33,7 +36,7 @@ alignas(16) uint8_t tensor_arena[kTensorArenaSize];
 uint8_t debug_image[48 * 48];
 
 void captureAndFillTensor() {
-  uint8_t row_buf[640]; // one row of 320 RGB565 pixels
+  uint8_t row_buf[2200]; // Large enough for variable row sizes
 
   // Enhanced FIFO clearing - flush multiple times to ensure clean state
   for (int i = 0; i < 3; i++) {
@@ -47,18 +50,21 @@ void captureAndFillTensor() {
 
   uint32_t fifo_len = cam.read_fifo_length();
   Serial.print("FIFO length: "); Serial.println(fifo_len);
-  
+
   // Warn if FIFO size is abnormal (expected ~153600 for 320x240 RGB565)
   if (fifo_len < 150000 || fifo_len > 160000) {
     Serial.print("WARNING: Abnormal FIFO size! Expected ~153600, got ");
     Serial.println(fifo_len);
   }
 
-  cam.CS_LOW();
-  SPI.transfer(BURST_FIFO_READ);
+  // Calculate bytes per row based on actual FIFO size (160x120 image)
+  uint32_t bytes_per_row = fifo_len / 120;
+  Serial.print("Bytes per row: "); Serial.println(bytes_per_row);
 
-  for (int src_row = 0; src_row < 240; src_row++) {
-    for (int i = 0; i < 640; i++) row_buf[i] = SPI.transfer(0x00);
+  cam.set_fifo_burst();
+
+  for (int src_row = 0; src_row < 120; src_row++) {
+    for (uint32_t i = 0; i < bytes_per_row; i++) row_buf[i] = cam.read_fifo();
 
     if (src_row == 0) {
       Serial.print("Row 0 sample bytes: ");
@@ -71,11 +77,14 @@ void captureAndFillTensor() {
     if (src_row % 5 != 0) continue;        // skip non-sampled rows
     int out_row = src_row / 5;
 
-    for (int out_col = 0; out_col < 48; out_col++) {
-      int src_col = (int)(out_col * 320.0f / 48.0f + 0.5f);
-      if (src_col >= 320) src_col = 319;
+    // Calculate actual pixel width from bytes per row
+    uint16_t pixels_per_row = bytes_per_row / 2;
 
-      uint16_t px = ((uint16_t)row_buf[src_col * 2] << 8) | row_buf[src_col * 2 + 1];
+    for (int out_col = 0; out_col < 48; out_col++) {
+      int src_col = (int)(out_col * (float)pixels_per_row / 48.0f + 0.5f);
+      if (src_col >= pixels_per_row) src_col = pixels_per_row - 1;
+
+      uint16_t px = row_buf[src_col * 2] | (row_buf[src_col * 2 + 1] << 8);
 
       // RGB565 → 8-bit components
       uint8_t r = ((px >> 11) & 0x1F) << 3;
@@ -93,12 +102,13 @@ void captureAndFillTensor() {
           (gray / 255.0f - kPixelMean) / kPixelStd;
     }
   }
-  cam.CS_HIGH();
 }
 
 void setup() {
   Serial.begin(115200);
   while (!Serial) { ; }
+  Serial.print("Firmware version: ");
+  Serial.println(FIRMWARE_VERSION);
 
   // --- Camera init ---
   Wire.begin();
@@ -122,23 +132,10 @@ void setup() {
 
   cam.set_format(BMP);
   cam.InitCAM();
-  cam.set_bit(ARDUCHIP_TIM, VSYNC_MASK);
+  cam.OV2640_set_JPEG_size(OV2640_160x120);
+  delay(1000);  // allow AEC/AGC to settle
   cam.clear_fifo_flag();
-
-  // Override to RGB565 raw output (bypass JPEG compression)
-  // Register 0xFF selects register bank (0x00 = DSP, 0x01 = sensor)
-  // Register 0xDA (IMAGE_MODE) controls output format:
-  //   Bit[4]=0 (non-compressed), Bit[3:2]=10 (RGB565)
-  cam.wrSensorReg8_8(0xFF, 0x00);  // Select DSP register bank
-  cam.wrSensorReg8_8(0xDA, 0x08);  // IMAGE_MODE: non-compressed RGB565
-
-  // Enable auto exposure and auto gain control
-  // Register 0xFF = 0x01 to access sensor registers
-  // Register 0x13 (COM8): Bit[0]=AEC enable, Bit[2]=AGC enable
-  // Register 0x14 (COM9): Bits[7:5]=AGC gain ceiling (100=32x)
-  cam.wrSensorReg8_8(0xFF, 0x01);  // Select sensor register bank
-  cam.wrSensorReg8_8(0x13, 0x05);  // COM8: Enable AEC (bit 0) and AGC (bit 2)
-  cam.wrSensorReg8_8(0x14, 0x48);  // COM9: AGC gain ceiling = 32x
+  
 
   Serial.println("Camera ready (320x240 RGB565)");
 
