@@ -4,7 +4,8 @@ DataImporter.py — Project 4: Gesture Detection
 Interactively builds a named dataset from the haGRID-30k sample.
 - Prompts for a dataset name (overrides existing if it already exists)
 - Prompts for which gestures to include
-- Crops each image to its bounding box, pads to square, resizes to 96x96 grayscale
+- Prompts for images per label and image resolution
+- Crops each image to its bounding box, pads to square, resizes to target resolution grayscale
 - Saves images and labels as numpy arrays to data/processed/<dataset_name>/
 
 Usage:
@@ -24,8 +25,6 @@ ANN_DIR      = os.path.join(HAGRID_DIR, "ann_train_val")
 IMAGE_DIR    = os.path.join(HAGRID_DIR, "hagrid_30k")
 OUTPUT_BASE  = os.path.join(SCRIPT_DIR, "data", "processed")
 
-# Inference target size (must match what the Arduino sketch expects)
-TARGET_SIZE  = 96
 BBOX_PADDING = 0.15   # fractional padding added around each bounding box
 MIN_CONF     = 0.80   # drop samples with leading_conf below this
 MIN_BOX_PX   = 20     # drop samples whose raw box is smaller than this (too far away)
@@ -89,7 +88,8 @@ def crop_hand(image: np.ndarray, bbox_norm: list[float]) -> np.ndarray | None:
 
 
 def process_gesture(gesture: str, label_idx: int,
-                    images_out: list, labels_out: list) -> int:
+                    images_out: list, labels_out: list,
+                    target_size: int, max_images: int) -> int:
     """
     Load all images for a gesture, crop, resize, and append to output lists.
     Returns the number of samples successfully processed.
@@ -104,6 +104,8 @@ def process_gesture(gesture: str, label_idx: int,
     total = len(annotations)
 
     for i, (uuid, ann) in enumerate(annotations.items()):
+        if count >= max_images:
+            break
         # Progress indicator
         if (i + 1) % 200 == 0 or (i + 1) == total:
             print(f"  [{gesture}] {i + 1}/{total} processed, {count} kept", end="\r")
@@ -132,7 +134,7 @@ def process_gesture(gesture: str, label_idx: int,
 
         # Square-pad → resize → grayscale
         crop = pad_to_square(crop)
-        crop = cv2.resize(crop, (TARGET_SIZE, TARGET_SIZE),
+        crop = cv2.resize(crop, (target_size, target_size),
                           interpolation=cv2.INTER_AREA)
         crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
 
@@ -205,6 +207,32 @@ def prompt_gestures(available: list[str]) -> list[str]:
             return chosen
 
 
+def prompt_images_per_label() -> int:
+    while True:
+        raw = input("\nImages per label (e.g. 500, or 0 for all): ").strip()
+        if not raw.isdigit():
+            print("  Please enter a whole number.")
+            continue
+        n = int(raw)
+        if n < 0:
+            print("  Must be 0 or greater.")
+            continue
+        return n if n > 0 else float("inf")
+
+
+def prompt_resolution() -> int:
+    while True:
+        raw = input("\nImage resolution (pixels, e.g. 96): ").strip()
+        if not raw.isdigit():
+            print("  Please enter a whole number.")
+            continue
+        n = int(raw)
+        if n < 8:
+            print("  Resolution must be at least 8.")
+            continue
+        return n
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -219,6 +247,8 @@ def main():
 
     dataset_name  = prompt_dataset_name()
     chosen        = prompt_gestures(gestures)
+    max_images    = prompt_images_per_label()
+    target_size   = prompt_resolution()
 
     out_dir = os.path.join(OUTPUT_BASE, dataset_name)
     os.makedirs(out_dir, exist_ok=True)
@@ -229,7 +259,9 @@ def main():
     with open(label_map_path, "w") as f:
         json.dump(label_map, f, indent=2)
 
-    print(f"\nBuilding dataset '{dataset_name}' with {len(chosen)} classes...")
+    max_display = str(max_images) if max_images != float("inf") else "all"
+    print(f"\nBuilding dataset '{dataset_name}' — {len(chosen)} classes, "
+          f"{max_display} images/label, {target_size}x{target_size}px")
     print(f"Output → {out_dir}\n")
 
     all_images: list[np.ndarray] = []
@@ -237,14 +269,14 @@ def main():
 
     for gesture, idx in label_map.items():
         print(f"Processing: {gesture} (label {idx})")
-        n = process_gesture(gesture, idx, all_images, all_labels)
+        n = process_gesture(gesture, idx, all_images, all_labels, target_size, max_images)
         print(f"  → {n} samples kept\n")
 
     if not all_images:
         print("ERROR: No samples were processed. Check your dataset path.")
         return
 
-    X = np.array(all_images, dtype=np.uint8)   # shape: (N, 96, 96)
+    X = np.array(all_images, dtype=np.uint8)   # shape: (N, res, res)
     y = np.array(all_labels, dtype=np.int32)    # shape: (N,)
 
     np.save(os.path.join(out_dir, "X.npy"), X)
