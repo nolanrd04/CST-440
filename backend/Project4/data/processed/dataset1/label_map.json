@@ -1,0 +1,7 @@
+{
+  "call": 0,
+  "dislike": 1,
+  "like": 2,
+  "mute": 3,
+  "ok": 4
+}
