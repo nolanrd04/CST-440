@@ -163,7 +163,7 @@ def convert_to_tflite(model):
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
     tflite_model = converter.convert()
 
-    tflite_path = os.path.join(os.path.dirname(__file__), "face_model.tflite")
+    tflite_path = os.path.join(os.path.dirname(__file__), "face_model2.0.tflite")
     with open(tflite_path, 'wb') as f:
         f.write(tflite_model)
 
@@ -184,7 +184,7 @@ def convert_to_tflite(model):
 def generate_c_header(tflite_model, label_map, index_to_label):
     """Generate C header file for Arduino deployment."""
     os.makedirs(ARDUINO_DIR, exist_ok=True)
-    header_path = os.path.join(ARDUINO_DIR, "face_model_data.h")
+    header_path = os.path.join(ARDUINO_DIR, "face_model2.0_data.h")
 
     mean = np.load(os.path.join(DATA_DIR, "mean.npy")).flatten()
     std = np.load(os.path.join(DATA_DIR, "std.npy")).flatten()
@@ -259,7 +259,7 @@ def main():
     tflite_model = convert_to_tflite(model)
     generate_c_header(tflite_model, label_map, index_to_label)
 
-    keras_path = os.path.join(os.path.dirname(__file__), "face_model.keras")
+    keras_path = os.path.join(os.path.dirname(__file__), "face_model2.0.keras")
     model.save(keras_path)
     print(f"Saved Keras model: {keras_path}")
 

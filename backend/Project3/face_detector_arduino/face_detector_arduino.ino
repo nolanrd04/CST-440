@@ -17,7 +17,7 @@
 #include "face_model_data.h"
 
 // Version
-const char* FIRMWARE_VERSION = "v2.6";
+const char* FIRMWARE_VERSION = "v3.1";
 
 // Camera configuration
 #define CS_PIN 10
@@ -35,36 +35,41 @@ alignas(16) uint8_t tensor_arena[kTensorArenaSize];
 // Debug: store grayscale image (48x48)
 uint8_t debug_image[48 * 48];
 
-void captureAndFillTensor() {
-  uint8_t row_buf[2200]; // Large enough for variable row sizes
+// Debug: store RGB565 color image (48x48)
+uint16_t debug_image_rgb565[48 * 48];
 
-  // Enhanced FIFO clearing - flush multiple times to ensure clean state
-  for (int i = 0; i < 3; i++) {
-    cam.flush_fifo();
-    cam.clear_fifo_flag();
-    delay(10);
-  }
-  
+void captureAndFillTensor() {
+  uint8_t row_buf[2200]; // Large enough for one row
+
+  cam.flush_fifo();
+  cam.clear_fifo_flag();
+
   cam.start_capture();
   while (!cam.get_bit(ARDUCHIP_TRIG, CAP_DONE_MASK)) { delay(1); }
 
   uint32_t fifo_len = cam.read_fifo_length();
   Serial.print("FIFO length: "); Serial.println(fifo_len);
 
-  // Warn if FIFO size is abnormal (expected ~153600 for 320x240 RGB565)
   if (fifo_len < 150000 || fifo_len > 160000) {
     Serial.print("WARNING: Abnormal FIFO size! Expected ~153600, got ");
     Serial.println(fifo_len);
   }
 
-  // Calculate bytes per row based on actual FIFO size (160x120 image)
-  uint32_t bytes_per_row = fifo_len / 120;
+  uint32_t bytes_per_row = fifo_len / 240;
   Serial.print("Bytes per row: "); Serial.println(bytes_per_row);
+  uint16_t pixels_per_row = bytes_per_row / 2;
 
   cam.set_fifo_burst();
 
-  for (int src_row = 0; src_row < 120; src_row++) {
-    for (uint32_t i = 0; i < bytes_per_row; i++) row_buf[i] = cam.read_fifo();
+  // Process image using nearest-neighbor interpolation
+  for (int src_row = 0; src_row < 240; src_row++) {
+    for (uint32_t i = 0; i < bytes_per_row; i++) {
+      row_buf[i] = cam.read_fifo();
+    }
+
+    // Determine which output row this source row maps to
+    int out_row = (src_row * 48 + 120) / 240;  // nearest output row with rounding
+    if (out_row >= 48) out_row = 47;
 
     if (src_row == 0) {
       Serial.print("Row 0 sample bytes: ");
@@ -74,28 +79,25 @@ void captureAndFillTensor() {
       Serial.println(row_buf[3], HEX);
     }
 
-    if (src_row % 5 != 0) continue;        // skip non-sampled rows
-    int out_row = src_row / 5;
-
-    // Calculate actual pixel width from bytes per row
-    uint16_t pixels_per_row = bytes_per_row / 2;
-
+    // Downsample columns with nearest-neighbor interpolation
     for (int out_col = 0; out_col < 48; out_col++) {
-      int src_col = (int)(out_col * (float)pixels_per_row / 48.0f + 0.5f);
+      // Find nearest source column
+      int src_col = (out_col * 320 + 160) / 48;  // nearest column with rounding
       if (src_col >= pixels_per_row) src_col = pixels_per_row - 1;
 
-      uint16_t px = row_buf[src_col * 2] | (row_buf[src_col * 2 + 1] << 8);
+      uint16_t px = (row_buf[src_col * 2] << 8) | row_buf[src_col * 2 + 1];
 
-      // RGB565 → 8-bit components
+      // Store RGB565 color
+      debug_image_rgb565[out_row * 48 + out_col] = px;
+
+      // RGB565 → grayscale
       uint8_t r = ((px >> 11) & 0x1F) << 3;
       uint8_t g = ((px >> 5)  & 0x3F) << 2;
       uint8_t b = (px         & 0x1F) << 3;
+      uint16_t gray = (77 * r + 150 * g + 29 * b) >> 8;
 
-      // Grayscale (BT.601 luminance, integer arithmetic)
-      float gray = (77 * r + 150 * g + 29 * b) / 256.0f;
-
-      // Store debug image (0-255 uint8)
-      debug_image[out_row * kImageSize + out_col] = (uint8_t)gray;
+      // Store debug image
+      debug_image[out_row * kImageSize + out_col] = gray;
 
       // Normalize to match training
       input->data.f[out_row * kImageSize + out_col] =
@@ -145,6 +147,11 @@ cam.wrSensorReg8_8(0xE0, 0x00);   // disable JPEG
 // Set RGB565 output
 cam.wrSensorReg8_8(0xDA, 0x08);
 
+// Enable auto exposure and auto gain control
+cam.wrSensorReg8_8(0xFF, 0x01);  // Select sensor register bank
+cam.wrSensorReg8_8(0x13, 0x05);  // COM8: Enable AEC (bit 0) and AGC (bit 2)
+cam.wrSensorReg8_8(0x14, 0x28);  // COM9: AGC gain ceiling = 16x
+
 Serial.println("Camera ready (320x240 RGB565)");
 
   // --- TFLite init ---
@@ -170,31 +177,13 @@ void loop() {
   char cmd = Serial.read();
   if (cmd != 'c') return;
 
-  Serial.println("Capturing...");
   captureAndFillTensor();
-
-  // Debug: print first few input tensor values
-  Serial.print("Input tensor sample [0]: "); Serial.println(input->data.f[0], 4);
-  Serial.print("Input tensor sample [100]: "); Serial.println(input->data.f[100], 4);
-  Serial.print("Input tensor sample [1000]: "); Serial.println(input->data.f[1000], 4);
 
   if (interpreter->Invoke() != kTfLiteOk) {
     Serial.println("Invoke() failed!"); return;
   }
 
-  float face     = output->data.f[0];  // Output indices are swapped in TFLite
-  float non_face = output->data.f[1];
-  Serial.print("Non-face score: "); Serial.println(non_face, 4);
-  Serial.print("Face score:     "); Serial.println(face, 4);
+  float non_face = output->data.f[0];
+  float face     = output->data.f[1];
   Serial.println(face > non_face ? "FACE DETECTED" : "NO FACE");
-
-  // Send debug image as hex (48x48 grayscale)
-  Serial.println("\nDEBUG_IMAGE_START");
-  for (int i = 0; i < 48 * 48; i++) {
-    if (debug_image[i] < 16) Serial.print("0");
-    Serial.print(debug_image[i], HEX);
-    if ((i + 1) % 48 == 0) Serial.println();  // newline after each row
-    else Serial.print(" ");
-  }
-  Serial.println("DEBUG_IMAGE_END\n");
 }

@@ -15,3 +15,9 @@ backend/Project1/simple_test/
 backend/.DS_Store
 .aider*
 backend/Project3/data/
+
+gesture_cnn_train.py
+Project3_Summary.md
+gesture_detection_demo.py
+backend/Project4/hagrid-sample-30k-384p
+backend/Project4/archive.zip
