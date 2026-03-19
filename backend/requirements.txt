@@ -13,3 +13,4 @@ tensorflow-model-optimization
 serial
 librosa
 soundfile
+opencv-python
