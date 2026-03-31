@@ -58,7 +58,7 @@ tflite::MicroInterpreter* interpreter = nullptr;
 TfLiteTensor* input = nullptr;
 TfLiteTensor* output = nullptr;
 
-constexpr int kTensorArenaSize = 100 * 1024;
+constexpr int kTensorArenaSize = 150 * 1024;
 alignas(16) uint8_t tensor_arena[kTensorArenaSize];
 
 // Debug: store grayscale image (96x96)
@@ -222,5 +222,12 @@ void loop() {
     Serial.print("NO GESTURE DETECTED");
     Serial.print("  (best: "); Serial.print(CLASS_NAMES[best_idx]);
     Serial.print(" @ "); Serial.print((int)(best_score * 100)); Serial.println("%)");
+  }
+
+  // Print debug image as ASCII art
+  Serial.println("\nDebug image (96x96 grayscale):");
+  for (int i = 0; i < IMG_ROWS * IMG_COLS; i++) {
+    Serial.print(debug_image[i] > 128 ? '#' : '.');
+    if ((i + 1) % IMG_COLS == 0) Serial.println();
   }
 }
