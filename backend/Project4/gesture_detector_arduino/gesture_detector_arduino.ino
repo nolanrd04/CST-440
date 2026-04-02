@@ -83,6 +83,10 @@ void captureAndFillTensor() {
   float   in_scale = input->params.scale;
   int32_t in_zp    = input->params.zero_point;
 
+  // Centered 96x96 crop offsets within the 320x240 frame
+  const int ROW_OFFSET = (240 - IMG_ROWS) / 2;  // 72: use rows 72-167
+  const int COL_OFFSET = (320 - IMG_COLS) / 2;  // 112: use cols 112-207
+
   cam.set_fifo_burst();
 
   for (int src_row = 0; src_row < 240; src_row++) {
@@ -90,13 +94,12 @@ void captureAndFillTensor() {
       row_buf[i] = cam.read_fifo();
     }
 
-    // Nearest-neighbor row mapping with rounding: 240 -> 96
-    int out_row = (src_row * IMG_ROWS + 120) / 240;
-    if (out_row >= IMG_ROWS) out_row = IMG_ROWS - 1;
+    // Skip rows outside the crop window (but still drain the FIFO above)
+    int out_row = src_row - ROW_OFFSET;
+    if (out_row < 0 || out_row >= IMG_ROWS) continue;
 
     for (int out_col = 0; out_col < IMG_COLS; out_col++) {
-      // Nearest-neighbor column mapping with rounding: 320 -> 96
-      int src_col = (out_col * 320 + 160) / IMG_COLS;
+      int src_col = out_col + COL_OFFSET;
       if (src_col >= (int)pixels_per_row) src_col = pixels_per_row - 1;
 
       // Unpack RGB565 big-endian
