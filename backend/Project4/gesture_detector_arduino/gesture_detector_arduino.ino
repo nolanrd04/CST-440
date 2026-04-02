@@ -43,6 +43,8 @@ ArduCAM cam(OV2640, CS_PIN);
 // Model dimensions
 #define IMG_ROWS   96
 #define IMG_COLS   96
+#define CROP_ROWS  192  // Intermediate crop size (then downsampled to 96x96)
+#define CROP_COLS  192
 #define NUM_CLASSES 5
 
 // Minimum dequantized softmax score to report a detection
@@ -83,9 +85,9 @@ void captureAndFillTensor() {
   float   in_scale = input->params.scale;
   int32_t in_zp    = input->params.zero_point;
 
-  // Centered 96x96 crop offsets within the 320x240 frame
-  const int ROW_OFFSET = (240 - IMG_ROWS) / 2;  // 72: use rows 72-167
-  const int COL_OFFSET = (320 - IMG_COLS) / 2;  // 112: use cols 112-207
+  // Centered 192x192 crop offsets within the 320x240 frame
+  const int CROP_ROW_OFFSET = (240 - CROP_ROWS) / 2;  // 24: use rows 24-215
+  const int CROP_COL_OFFSET = (320 - CROP_COLS) / 2;  // 64: use cols 64-255
 
   cam.set_fifo_burst();
 
@@ -94,12 +96,18 @@ void captureAndFillTensor() {
       row_buf[i] = cam.read_fifo();
     }
 
-    // Skip rows outside the crop window (but still drain the FIFO above)
-    int out_row = src_row - ROW_OFFSET;
-    if (out_row < 0 || out_row >= IMG_ROWS) continue;
+    // Determine which crop row this source row maps to
+    int crop_row = src_row - CROP_ROW_OFFSET;
+    if (crop_row < 0 || crop_row >= CROP_ROWS) continue;
+
+    // Sample every 2nd row from the cropped 192x192 to get 96x96
+    if (crop_row % 2 != 0) continue;  // Skip odd rows
+    int out_row = crop_row / 2;
 
     for (int out_col = 0; out_col < IMG_COLS; out_col++) {
-      int src_col = out_col + COL_OFFSET;
+      // Sample every 2nd column from the cropped region
+      int crop_col = out_col * 2;
+      int src_col = crop_col + CROP_COL_OFFSET;
       if (src_col >= (int)pixels_per_row) src_col = pixels_per_row - 1;
 
       // Unpack RGB565 big-endian
@@ -165,9 +173,9 @@ void setup() {
   // Set RGB565 output
   cam.wrSensorReg8_8(0xDA, 0x08);
 
-  // Enable auto exposure and auto gain control
+  // Disable auto exposure and auto gain control (manual mode)
   cam.wrSensorReg8_8(0xFF, 0x01);
-  cam.wrSensorReg8_8(0x13, 0x05);  // COM8: AEC + AGC
+  cam.wrSensorReg8_8(0x13, 0x00);  // COM8: Disable AEC + AGC
   cam.wrSensorReg8_8(0x14, 0x48);  // COM9: AGC gain ceiling = 32x
 
   Serial.println("Camera ready (320x240 RGB565)");
@@ -227,10 +235,13 @@ void loop() {
     Serial.print(" @ "); Serial.print((int)(best_score * 100)); Serial.println("%)");
   }
 
-  // Print debug image as ASCII art
-  Serial.println("\nDebug image (96x96 grayscale):");
+  // Send debug image as hex (96x96 grayscale)
+  Serial.println("\nDEBUG_IMAGE_START");
   for (int i = 0; i < IMG_ROWS * IMG_COLS; i++) {
-    Serial.print(debug_image[i] > 128 ? '#' : '.');
-    if ((i + 1) % IMG_COLS == 0) Serial.println();
+    if (debug_image[i] < 16) Serial.print("0");
+    Serial.print(debug_image[i], HEX);
+    if ((i + 1) % IMG_COLS == 0) Serial.println();  // newline after each row
+    else Serial.print(" ");
   }
+  Serial.println("DEBUG_IMAGE_END\n");
 }
