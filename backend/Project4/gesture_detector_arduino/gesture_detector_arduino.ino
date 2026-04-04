@@ -48,7 +48,7 @@ ArduCAM cam(OV2640, CS_PIN);
 #define NUM_CLASSES 5
 
 // Minimum dequantized softmax score to report a detection
-const float CONFIDENCE_THRESHOLD = 0.60f;
+const float CONFIDENCE_THRESHOLD = 0.30f;
 
 const char* CLASS_NAMES[NUM_CLASSES] = {
   "call", "dislike", "like", "mute", "ok"

@@ -27,7 +27,7 @@ from model import build_model
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
-DATASET_NAME  = "dataset1"
+DATASET_NAME  = "my_gestures"
 SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR      = os.path.join(SCRIPT_DIR, "data", "processed", DATASET_NAME)
 OUTPUT_DIR    = os.path.join(SCRIPT_DIR, "gesture_detector_arduino")

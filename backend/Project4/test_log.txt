@@ -1,0 +1,24 @@
+gesture,, predicted -> position
+
+like, ok
+dislike, ok
+like, call
+dislike, dislike 70% --> center, cover entire face, both hands 
+dislike, call/ok -> if use left/right hands on the side of face
+call, call 100% --> center, cover face
+ok, ok 99% --> to the left of face, left hand
+ok, call --> center
+like, call/ok --> no matter location
+mute, call 95% --> both hands
+ok, ok 75% -> center, left hand
+call, ok 81% -> if left hand on the side of face
+call, call 80% 3x -> if right hand on the side
+call, call 78% 3x -> right hand, cover face
+call, call 88% -> left hand, side
+
+
+conclusion:
+ok -> doing good if left hand
+dislike -> doing good if cover face
+call -> good if right hand, side/center or left
+like, mute - can't detect at all
