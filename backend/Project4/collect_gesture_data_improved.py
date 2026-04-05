@@ -6,7 +6,7 @@ Improved gesture data collection with:
 - Auto-detection of poor quality frames (blurry, too dark, etc.)
 - Progress bars and clearer UI
 - Ensures diversity in lighting/distance
-- Saves raw captures for inspection
+- Saves raw captures for inspection.
 
 Usage:
     python collect_gesture_data_improved.py
