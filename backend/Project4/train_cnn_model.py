@@ -27,14 +27,20 @@ from model import build_model
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
-DATASET_NAME  = "my_gestures"
 SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
+DATASET_NAME  = input("Dataset name: ").strip()
+_model_input  = input("Model name (press Enter for 'gesture_model'): ").strip()
+MODEL_NAME    = _model_input if _model_input else "gesture_model"
 DATA_DIR      = os.path.join(SCRIPT_DIR, "data", "processed", DATASET_NAME)
-OUTPUT_DIR    = os.path.join(SCRIPT_DIR, "gesture_detector_arduino")
+MODEL_DIR     = os.path.join(SCRIPT_DIR, "models", MODEL_NAME)
+ARDUINO_DIR   = os.path.join(SCRIPT_DIR, "gesture_detector_arduino")
 
-MODEL_KERAS   = os.path.join(SCRIPT_DIR, "gesture_model.keras")
-MODEL_TFLITE  = os.path.join(SCRIPT_DIR, "gesture_model.tflite")
-MODEL_HEADER  = os.path.join(OUTPUT_DIR,  "model_data.h")
+os.makedirs(MODEL_DIR, exist_ok=True)
+
+MODEL_KERAS   = os.path.join(MODEL_DIR, f"{MODEL_NAME}.keras")
+MODEL_TFLITE  = os.path.join(MODEL_DIR, f"{MODEL_NAME}.tflite")
+MODEL_HEADER  = os.path.join(MODEL_DIR, "model_data.h")
+ARDUINO_HEADER = os.path.join(ARDUINO_DIR, "model_data.h")
 
 SEED          = 42
 VAL_SPLIT     = 0.15
@@ -93,7 +99,7 @@ def plot_history(history):
     axes[1].legend()
 
     plt.tight_layout()
-    path = os.path.join(SCRIPT_DIR, "training_history.png")
+    path = os.path.join(MODEL_DIR, "training_history.png")
     plt.savefig(path)
     print(f"  Training history plot saved → {path}")
 
@@ -107,7 +113,7 @@ def plot_confusion_matrix(y_true, y_pred, class_names):
     ax.set_ylabel("True")
     ax.set_title("Confusion Matrix — Test Set")
     plt.tight_layout()
-    path = os.path.join(SCRIPT_DIR, "confusion_matrix.png")
+    path = os.path.join(MODEL_DIR, "confusion_matrix.png")
     plt.savefig(path)
     print(f"  Confusion matrix saved → {path}")
 
@@ -148,8 +154,6 @@ def convert_to_tflite(model, X_rep: np.ndarray):
 
 def generate_c_header(tflite_bytes):
     """Write a C byte-array header suitable for Arduino / TFLite Micro."""
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
     var_name = "gesture_model_tflite"
     lines = [
         "// Auto-generated — do not edit manually.",
@@ -162,7 +166,6 @@ def generate_c_header(tflite_bytes):
     ]
 
     hex_values = [f"  0x{b:02x}" for b in tflite_bytes]
-    # Group into rows of 12 for readability
     for i in range(0, len(hex_values), 12):
         row = hex_values[i:i + 12]
         lines.append(", ".join(row) + ",")
@@ -173,6 +176,7 @@ def generate_c_header(tflite_bytes):
         f.write("\n".join(lines) + "\n")
 
     print(f"  C header saved      → {MODEL_HEADER}")
+    print(f"  To deploy, copy model_data.h to: {ARDUINO_DIR}/")
 
 
 def verify_tflite(tflite_bytes, X_sample, y_sample):

@@ -19,17 +19,21 @@ import cv2
 import numpy as np
 import tensorflow as tf
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(SCRIPT_DIR, "gesture_model.keras")
-LABEL_MAP_PATH = os.path.join(SCRIPT_DIR, "data", "processed", "my_gestures", "label_map.json")
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 print("\n" + "="*70)
 print("FLOAT32 WEBCAM TEST")
 print("="*70)
 
+model_name   = input("Model name: ").strip()
+dataset_name = input("Dataset name: ").strip()
+
+MODEL_PATH     = os.path.join(PROJECT_DIR, "models", model_name, f"{model_name}.keras")
+LABEL_MAP_PATH = os.path.join(PROJECT_DIR, "data", "processed", dataset_name, "label_map.json")
+
 # Load model
 if not os.path.exists(MODEL_PATH):
-    print(f"❌ Model not found: {MODEL_PATH}")
+    print(f"Model not found: {MODEL_PATH}")
     exit(1)
 
 print(f"Loading model from {MODEL_PATH}...")
@@ -37,7 +41,7 @@ model = tf.keras.models.load_model(MODEL_PATH)
 
 # Load label map
 if not os.path.exists(LABEL_MAP_PATH):
-    print(f"❌ Label map not found: {LABEL_MAP_PATH}")
+    print(f"Label map not found: {LABEL_MAP_PATH}")
     exit(1)
 
 with open(LABEL_MAP_PATH) as f:
@@ -47,8 +51,8 @@ idx_to_name = {v: k for k, v in label_map.items()}
 class_names = [idx_to_name[i] for i in range(len(idx_to_name))]
 
 print(f"Classes: {class_names}")
-print("\n📷 Opening webcam...")
-print("   Controls: 'c' to classify, 'q' to quit\n")
+print("\nOpening webcam...")
+print("  Controls: 'c' to classify, 'q' to quit\n")
 
 # Open webcam
 cap = cv2.VideoCapture(0)
