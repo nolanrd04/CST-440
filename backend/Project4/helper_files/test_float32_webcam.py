@@ -79,10 +79,19 @@ while True:
     key = cv2.waitKey(1) & 0xFF
     
     if key == ord('c'):
-        # Preprocess: grayscale → 96×96 → normalize
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # Center-crop the largest square from the frame, then resize to 96×96
+        h, w = frame.shape[:2]
+        size = min(h, w)
+        y0 = (h - size) // 2
+        x0 = (w - size) // 2
+        square = frame[y0:y0+size, x0:x0+size]
+        gray = cv2.cvtColor(square, cv2.COLOR_BGR2GRAY)
         resized = cv2.resize(gray, (96, 96), interpolation=cv2.INTER_AREA)
         resized_norm = resized.astype(np.float32) / 255.0
+
+        # Show the exact pixels the model sees (scaled up so it's visible)
+        preview = cv2.resize(resized, (288, 288), interpolation=cv2.INTER_NEAREST)
+        cv2.imshow("Model input (96x96)", preview)
         
         # Classify
         pred = model.predict(resized_norm[np.newaxis, ..., np.newaxis], verbose=0)[0]

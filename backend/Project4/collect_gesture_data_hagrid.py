@@ -3,9 +3,8 @@
 collect_gesture_data_hagrid.py
 
 Builds a gesture dataset from the local HaGRID sample by:
-  - Cropping a square region centered on the hand bbox at CONTEXT_SCALE × the
-    bbox size, so the hand fills ~1/CONTEXT_SCALE of the frame with surrounding
-    context — similar to holding your hand close to a webcam/Arduino camera
+  - Cropping a square centered on the hand bbox with BBOX_PAD padding on each
+    side, so the hand fills most of the frame with a small border around it
   - Resizing that crop to 96×96 grayscale
   - Applying the same quality checks as collect_gesture_data_improved.py
     (blur rejection, darkness rejection)
@@ -28,9 +27,9 @@ IMG_ROOT    = os.path.join(HAGRID_ROOT, "hagrid_30k")
 ANN_ROOT    = os.path.join(HAGRID_ROOT, "ann_train_val")
 DATA_BASE   = os.path.join(SCRIPT_DIR, "data", "processed")
 
-IMG_SIZE       = 96
-CONTEXT_SCALE  = 3.0   # crop square = CONTEXT_SCALE × max(bbox_w, bbox_h)
-                        # hand fills ~1/CONTEXT_SCALE of the frame (~33%)
+IMG_SIZE  = 96
+BBOX_PAD  = 0.3   # fractional padding added around each side of the hand bbox
+                  # 0.3 = 30% padding → hand fills ~77% of the crop
 
 VALID_GESTURES = [
     "call", "dislike", "fist", "four", "like", "mute", "ok",
@@ -138,21 +137,31 @@ for gesture in gestures:
 
         h_img, w_img = img_bgr.shape[:2]
 
-        # HaGRID bbox: [x_center, y_center, width, height] normalised to [0,1]
-        xc, yc, bw, bh = bboxes[0]
-        cx_px = xc * w_img
-        cy_px = yc * h_img
+        # HaGRID bbox: [x_min, y_min, width, height] normalised to [0,1]
+        x_min, y_min, bw, bh = bboxes[0]
+        cx_px = (x_min + bw / 2) * w_img
+        cy_px = (y_min + bh / 2) * h_img
 
-        # Square crop at CONTEXT_SCALE × the larger bbox dimension
-        half = max(bw * w_img, bh * h_img) * CONTEXT_SCALE / 2
+        # Square crop centered on the hand with BBOX_PAD padding on each side
+        bw_px = bw * w_img
+        bh_px = bh * h_img
+        half = max(bw_px, bh_px) / 2 * (1 + BBOX_PAD)
         x1 = int(cx_px - half)
         y1 = int(cy_px - half)
         x2 = int(cx_px + half)
         y2 = int(cy_px + half)
 
-        # Clamp to image bounds
-        x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(w_img, x2), min(h_img, y2)
+        # Shift the window (not just clamp) so the hand stays centered
+        # Clamping only one side would push the hand to a corner
+        if x1 < 0:
+            x2 -= x1; x1 = 0
+        if y1 < 0:
+            y2 -= y1; y1 = 0
+        if x2 > w_img:
+            x1 -= (x2 - w_img); x2 = w_img
+        if y2 > h_img:
+            y1 -= (y2 - h_img); y2 = h_img
+        x1, y1 = max(0, x1), max(0, y1)  # safety clamp after shift
 
         if x2 <= x1 or y2 <= y1:
             rejected_crop += 1
@@ -198,3 +207,30 @@ print(f"  Per-class     : {counts}")
 print(f"\nNext: edit train_cnn_model.py → DATASET_NAME = \"{dataset_name}\"")
 print("      then: python train_cnn_model.py")
 print("=" * 70 + "\n")
+
+# ── Sample preview ─────────────────────────────────────────────────────────────
+PREVIEW_PER_CLASS = 20  # samples per gesture shown in the grid
+idx_to_label = {v: k for k, v in label_map.items()}
+
+rows = []
+for gesture in gestures:
+    idxs = np.where(y == label_map[gesture])[0]
+    picks = idxs[np.linspace(0, len(idxs) - 1, PREVIEW_PER_CLASS, dtype=int)]
+    row_imgs = []
+    for i in picks:
+        tile = X[i].copy()
+        # Label each tile with the gesture name
+        cv2.putText(tile, gesture[:6], (2, 12),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,), 1)
+        row_imgs.append(tile)
+    rows.append(np.hstack(row_imgs))
+
+# Pad rows to the same width if class counts differ
+max_w = max(r.shape[1] for r in rows)
+rows = [np.hstack([r, np.zeros((IMG_SIZE, max_w - r.shape[1]), dtype=np.uint8)])
+        if r.shape[1] < max_w else r for r in rows]
+
+grid = np.vstack(rows)
+cv2.imshow("Sample crops — press any key to close", grid)
+cv2.waitKey(0)
+cv2.destroyAllWindows()
